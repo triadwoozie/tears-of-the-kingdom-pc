@@ -75,6 +75,9 @@ add_library(totk_recomp_runtime STATIC
     src/runtime/services_hle.cpp
     src/runtime/filesystem_hle.cpp
     src/runtime/hlr_sead.cpp
+    src/runtime/audio_hle.cpp
+    src/runtime/video_hle.cpp
+    src/runtime/module_loader.cpp
     ${PLATFORM_SOURCES}
 )
 target_include_directories(totk_recomp_runtime PUBLIC
@@ -101,6 +104,11 @@ target_include_directories(totk_recomp_recompiler PUBLIC
 add_library(totk_recomp_graphics STATIC
     src/graphics/nvn_vk.cpp
     src/graphics/vk_pipeline_cache.cpp
+    src/graphics/hle_nvn_gen.cpp
+    src/graphics/nvn_buffer_cache.cpp
+    src/graphics/nvn_uniform_snapshot.cpp
+    src/graphics/nvn_conditional_draw.cpp
+    src/graphics/nvn_texture_cache.cpp
 )
 target_include_directories(totk_recomp_graphics PUBLIC
     src/
@@ -158,10 +166,16 @@ function(add_totk_test TEST_NAME TEST_SRC)
         src/
         src/runtime/
         ${SIMDE_INCLUDE_DIR}
+        ${VOLK_INCLUDE_DIR}
+        ${VULKAN_HEADERS_INCLUDE_DIR}
+        ${VMA_INCLUDE_DIR}
     )
     target_link_libraries(${TEST_NAME} PRIVATE
         totk_recomp_runtime
         totk_recomp_recompiler
+        totk_recomp_graphics
+        volk
+        SDL3::SDL3
     )
     if(NOT MSVC)
         target_link_libraries(${TEST_NAME} PRIVATE m dl pthread)
@@ -173,3 +187,6 @@ add_totk_test(test_abi_structs tests/test_abi_structs.cpp)
 add_totk_test(test_memory_window tests/test_memory_window.cpp)
 add_totk_test(test_lifter_neon tests/test_lifter_neon.cpp)
 add_totk_test(test_kernel_sync tests/test_kernel_sync.cpp)
+add_totk_test(test_nvn_vulkan tests/test_nvn_vulkan.cpp)
+add_totk_test(test_audio_hid tests/test_audio_hid.cpp)
+add_totk_test(test_module_loader tests/test_module_loader.cpp)
