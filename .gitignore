@@ -1,0 +1,35 @@
+# Build & Intermediate artifacts
+build/
+bin/
+out/
+target/
+zig-cache/
+zig-out/
+CMakeFiles/
+CMakeCache.txt
+
+# Local workspace & scratch
+local/
+work/
+scratch/
+reference_repos/
+
+# Proprietary ROMs, dumps, encryption keys, binaries
+*.nsp
+*.xci
+*.nsz
+*.nca
+*.keys
+*.bin
+*.nso
+*.nro
+*.elf
+*.so
+*.dll
+*.dylib
+
+# System / IDE
+.vscode/
+.idea/
+*.swp
+*.DS_Store
