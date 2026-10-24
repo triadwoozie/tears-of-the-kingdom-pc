@@ -29,10 +29,11 @@ static bool lz4_decompress_block(const uint8_t *src, size_t src_len, uint8_t *ds
                 lit_len += s;
             } while (s == 255);
         }
-        if (ip + lit_len > src_len || op + lit_len > dst_len) return false;
-        std::memcpy(dst + op, src + ip, lit_len);
+        if (ip + lit_len > src_len) return false;
+        size_t lit_copy = std::min(lit_len, dst_len - op);
+        std::memcpy(dst + op, src + ip, lit_copy);
         ip += lit_len;
-        op += lit_len;
+        op += lit_copy;
         if (ip >= src_len || op >= dst_len) break;
 
         if (ip + 2 > src_len) return false;
@@ -49,13 +50,13 @@ static bool lz4_decompress_block(const uint8_t *src, size_t src_len, uint8_t *ds
                 match_len += s;
             } while (s == 255);
         }
-        if (op + match_len > dst_len) return false;
+        size_t match_copy = std::min(match_len, dst_len - op);
         size_t match_src = op - offset;
-        for (size_t i = 0; i < match_len; ++i) {
+        for (size_t i = 0; i < match_copy; ++i) {
             dst[op++] = dst[match_src++];
         }
     }
-    return true;
+    return op == dst_len;
 }
 
 // Self-contained standard SHA-256 implementation
@@ -276,7 +277,7 @@ bool ModuleLoader::parse_and_map_nso(const uint8_t *raw, size_t raw_size, uint64
     mod.rodata_size = header.segments[1].size;
     mod.data_off = header.segments[2].memory_offset;
     mod.data_size = header.segments[2].size;
-    mod.bss_size = header.bss_size;
+    mod.bss_size = header.segments[2].align_or_reserved;
 
     char build_hex[65] = {0};
     for (int i = 0; i < 32; ++i) {

@@ -145,8 +145,13 @@ static int run_boot_trace() {
     for (const auto &p : exefs_paths) {
         if (fs::exists(p)) {
             found_real = true;
-            loader.load_nso(p, next_base);
-            next_base += 0x2000000ULL; // 32 MiB spacing per module
+            bool ok = loader.load_nso(p, next_base);
+            std::printf("[Boot-Trace] Loading %s at 0x%llx: %s\n",
+                        p.c_str(), static_cast<unsigned long long>(next_base),
+                        ok ? "SUCCESS" : loader.get_last_error().c_str());
+            if (ok) {
+                next_base += 0x4000000ULL; // 64 MiB spacing per module (main is ~46MB)
+            }
         }
     }
 

@@ -377,6 +377,22 @@ class Lifter:
             if opc == 2:
                 return Insn('op', set_reg(1, rt, f'(int64_t)(int32_t)LD32({hx(addr)})'))
             return Insn('op', '/* prfm */')
+        if bits(w, 27, 3) == 0b011 and bits(w, 24, 2) == 1:
+            size, opc, rn, rt = bits(w, 30, 2), bits(w, 22, 2), bits(w, 5, 5), bits(w, 0, 5)
+            imm9 = sext(bits(w, 12, 9), 9)
+            base = XS(rn)
+            ea = base if imm9 == 0 else (f'{base} + {imm9}' if imm9 > 0 else f'{base} - {-imm9}')
+            nbits = 8 << size
+            if bits(w, 21, 1) and bits(w, 10, 2) == 2:  # LDAPR / LDAPUR
+                return Insn('op', set_reg(1 if size == 3 else 0, rt, f'lda{nbits}({ea})'))
+            if opc == 0:
+                return Insn('op', f'ST{nbits}({ea}, {X(rt) if size == 3 else W(rt)});')
+            elif opc == 1:
+                return Insn('op', set_reg(1 if size == 3 else 0, rt, f'LD{nbits}({ea})'))
+            elif opc == 2:
+                return Insn('op', set_reg(1, rt, f'(uint64_t)(int64_t)(int{nbits}_t)LD{nbits}({ea})'))
+            else:
+                return Insn('op', '/* prfm unscaled */')
         if bits(w, 27, 3) == 0b101:
             return self.ldst_pair(w)
         if bits(w, 27, 3) == 0b111:
@@ -389,7 +405,17 @@ class Lifter:
         nbits = 8 << size
         addr = XS(rn)
         if o1:
-            raise Unsupported('exclusive pair / CAS')
+            rt2 = bits(w, 10, 5)
+            if L:
+                if size == 3:
+                    return Insn('op', f'{{ uint64_t a = {addr}; c->excl_addr = a; c->excl_val = LD64(a); {set_reg(1, rt, "LD64(a)")} {set_reg(1, rt2, "LD64(a + 8)")} }}')
+                else:
+                    return Insn('op', f'{{ uint64_t a = {addr}; c->excl_addr = a; c->excl_val = LD32(a); {set_reg(0, rt, "LD32(a)")} {set_reg(0, rt2, "LD32(a + 4)")} }}')
+            else:
+                if size == 3:
+                    return Insn('op', f'{{ uint64_t a = {addr}; uint32_t st = (c->excl_addr != a); if (!st) {{ ST64(a, {X(rt)}); ST64(a + 8, {X(rt2)}); c->excl_addr = ~0ull; }} {set_reg(0, rs, "st")} }}')
+                else:
+                    return Insn('op', f'{{ uint64_t a = {addr}; uint32_t st = (c->excl_addr != a); if (!st) {{ ST32(a, {W(rt)}); ST32(a + 4, {W(rt2)}); c->excl_addr = ~0ull; }} {set_reg(0, rs, "st")} }}')
         if o2 == 0:
             if L:
                 return Insn('op', set_reg(1, rt, f'ldx{nbits}(c, {addr})'))

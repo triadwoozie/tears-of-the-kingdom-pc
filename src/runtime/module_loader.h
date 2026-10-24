@@ -14,6 +14,7 @@ struct NsoSegmentHeader {
     uint32_t file_offset;
     uint32_t memory_offset;
     uint32_t size;
+    uint32_t align_or_reserved;
 };
 
 struct NsoHeader {
@@ -21,15 +22,11 @@ struct NsoHeader {
     uint32_t version;
     uint32_t reserved;
     uint32_t flags;
-    NsoSegmentHeader segments[3]; // 0: text, 1: rodata, 2: data
-    uint32_t module_name_offset;
-    uint32_t module_name_size;
-    uint32_t bss_size;
-    uint8_t build_id[0x20];
-    uint32_t compressed_sizes[3];
-    uint8_t padding[0x24];
-    NsoSegmentHeader ext_segments[3];
-    uint8_t hashes[3][0x20];
+    NsoSegmentHeader segments[3]; // 0: text, 1: rodata, 2: data (0x10 to 0x40)
+    uint8_t build_id[0x20];       // 0x40 to 0x60
+    uint32_t compressed_sizes[3]; // 0x60 to 0x6C
+    uint8_t padding[0x34];        // 0x6C to 0xA0
+    uint8_t hashes[3][0x20];      // 0xA0 to 0x100
 };
 #pragma pack(pop)
 
