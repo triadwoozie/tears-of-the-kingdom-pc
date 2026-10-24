@@ -1,8 +1,10 @@
 #include "runtime/module_loader.h"
+#include "runtime/memory_manager.h"
 #include "recompiler/arm64_ctx.h"
 #include "recompiler/dispatch.h"
 #include <cassert>
 #include <cstdio>
+#include <filesystem>
 
 static bool s_mock_called_1 = false;
 static bool s_mock_called_2 = false;
@@ -65,16 +67,54 @@ void test_module_loader_symbol_registration() {
     assert(s_mock_called_2 == true);
     assert(ctx.x[1] == 0x12345678ULL + 42);
 
+    // Test guest symbol lookup
+    uint64_t addr = loader.resolve_guest_symbol("f_main_10000");
+    assert(addr == 0x7100010000ULL);
+
     std::printf("  -> Module Loader Symbol Table & Indirect Call: PASSED\n");
+}
+
+void test_module_loader_nso_decompression() {
+    std::printf("[Test] Running test_module_loader_nso_decompression...\n");
+
+    auto &mm = totk::runtime::MemoryManager::instance();
+    mm.initialize();
+
+    auto &loader = totk::runtime::ModuleLoader::instance();
+
+    if (std::filesystem::exists("work/test_synth.nso")) {
+        bool ok = loader.load_nso("work/test_synth.nso", 0x7100000000ULL, "test_synth");
+        assert(ok);
+        assert(loader.is_loaded());
+        assert(!loader.get_loaded_modules().empty());
+
+        const auto &mod = loader.get_loaded_modules().back();
+        assert(mod.name == "test_synth");
+        assert(mod.base_addr == 0x7100000000ULL);
+
+        // Verify segment memory mapping
+        const uint32_t *text_mapped = reinterpret_cast<const uint32_t *>(0x7100000000ULL);
+        // First instruction in test_synth: stp x29, x30, [sp, -16]! (0xA9BF7BFD)
+        assert(text_mapped[0] == 0xA9BF7BFD);
+
+        // Apply relocations
+        size_t relocs = loader.apply_relocations();
+        (void)relocs;
+
+        std::printf("  -> NSO0 Decompression & Segment Mapping: PASSED\n");
+    } else {
+        std::printf("  -> NSO0 Decompression skipped (no test_synth.nso)\n");
+    }
 }
 
 int main() {
     std::printf("==================================================\n");
-    std::printf("  Dynamic Module Loader Unit Tests\n");
+    std::printf("  Dynamic Module Loader & NSO Unit Tests\n");
     std::printf("==================================================\n");
 
     test_module_loader_errors();
     test_module_loader_symbol_registration();
+    test_module_loader_nso_decompression();
 
     std::printf("\nAll Module Loader unit tests PASSED successfully!\n");
     return 0;

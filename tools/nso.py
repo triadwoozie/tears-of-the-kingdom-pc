@@ -1,7 +1,46 @@
 """NSO loader: decompress segments, build the memory image, parse MOD0/dynamic info."""
+import hashlib
 import struct
 import sys
-import lz4.block
+
+try:
+    import lz4.block
+    def lz4_decompress(data, uncompressed_size):
+        return lz4.block.decompress(data, uncompressed_size=uncompressed_size)
+except ImportError:
+    def lz4_decompress(data, uncompressed_size):
+        src = memoryview(data)
+        dst = bytearray()
+        ip = 0
+        src_len = len(src)
+        while ip < src_len:
+            token = src[ip]
+            ip += 1
+            lit_len = token >> 4
+            if lit_len == 15:
+                while ip < src_len:
+                    s = src[ip]
+                    ip += 1
+                    lit_len += s
+                    if s != 255: break
+            dst.extend(src[ip:ip+lit_len])
+            ip += lit_len
+            if ip >= src_len: break
+            offset = src[ip] | (src[ip+1] << 8)
+            ip += 2
+            match_len = (token & 0x0F) + 4
+            if match_len == 19:
+                while ip < src_len:
+                    s = src[ip]
+                    ip += 1
+                    match_len += s
+                    if s != 255: break
+            pos = len(dst) - offset
+            for _ in range(match_len):
+                dst.append(dst[pos])
+                pos += 1
+        return bytes(dst[:uncompressed_size])
+
 
 DT_NULL, DT_NEEDED, DT_PLTRELSZ, DT_HASH, DT_STRTAB, DT_SYMTAB, DT_RELA, DT_RELASZ = 0, 1, 2, 4, 5, 6, 7, 8
 DT_STRSZ, DT_JMPREL, DT_RELACOUNT = 10, 23, 0x6FFFFFF9
@@ -10,18 +49,32 @@ R_AARCH64_ABS64, R_AARCH64_GLOB_DAT, R_AARCH64_JUMP_SLOT, R_AARCH64_RELATIVE = 2
 
 class Nso:
     def __init__(self, path):
-        raw = open(path, 'rb').read()
-        assert raw[:4] == b'NSO0', path
-        flags = struct.unpack_from('<I', raw, 0xC)[0]
+        if isinstance(path, (bytes, bytearray)):
+            raw = bytes(path)
+        else:
+            raw = open(path, 'rb').read()
+        assert raw[:4] == b'NSO0', f"Invalid NSO magic: {path}"
+        self.flags = struct.unpack_from('<I', raw, 0xC)[0]
         self.build_id = raw[0x40:0x60].rstrip(b'\0').hex()
         segs = []
+        seg_hashes = [raw[0xA0:0xC0], raw[0xC0:0xE0], raw[0xE0:0x100]]
+        self.hashes_verified = True
+
         for i in range(3):
             file_off, mem_off, dec_size = struct.unpack_from('<III', raw, 0x10 + i * 0x10)
             comp_size = struct.unpack_from('<I', raw, 0x60 + i * 4)[0]
             data = raw[file_off:file_off + comp_size]
-            if flags & (1 << i):
-                data = lz4.block.decompress(data, uncompressed_size=dec_size)
+            if self.flags & (1 << i):
+                data = lz4_decompress(data, dec_size)
+
+            # SHA-256 hash check if flag bit is set
+            if self.flags & (1 << (i + 3)):
+                actual_hash = hashlib.sha256(data).digest()
+                if actual_hash != seg_hashes[i]:
+                    self.hashes_verified = False
+
             segs.append((mem_off, data))
+
         self.bss_size = struct.unpack_from('<I', raw, 0x3C)[0]
         self.text = (segs[0][0], len(segs[0][1]))
         self.rodata = (segs[1][0], len(segs[1][1]))
@@ -39,14 +92,19 @@ class Nso:
 
     def _parse_mod0(self):
         mod0 = self.u32(4)
-        assert self.image[mod0:mod0 + 4] == b'MOD0'
+        if mod0 + 4 > len(self.image) or self.image[mod0:mod0 + 4] != b'MOD0':
+            self.dynamic = 0
+            self.syms = []
+            self.relocs = []
+            self.needed = []
+            return
         rel = lambda i: mod0 + struct.unpack_from('<i', self.image, mod0 + 4 + i * 4)[0]
         self.dynamic, self.bss_start, self.bss_end = rel(0), rel(1), rel(2)
         self.eh_start, self.eh_end, self.module_obj = rel(3), rel(4), rel(5)
         dyn = {}
         needed = []
         off = self.dynamic
-        while True:
+        while off + 16 <= len(self.image):
             tag, val = self.u64(off), self.u64(off + 8)
             off += 16
             if tag == DT_NULL:
@@ -57,7 +115,7 @@ class Nso:
         self.dyn = dyn
         strtab = dyn.get(DT_STRTAB, 0)
         self.strtab = strtab
-        self.needed = [self.cstr(strtab + n) for n in needed]
+        self.needed = [self.cstr(strtab + n) for n in needed if strtab + n < len(self.image)]
         # dynsym count from DT_HASH nchain
         self.syms = []
         if DT_HASH in dyn and DT_SYMTAB in dyn:
@@ -65,6 +123,7 @@ class Nso:
             st = dyn[DT_SYMTAB]
             for i in range(nchain):
                 o = st + i * 24
+                if o + 24 > len(self.image): break
                 name, info, other, shndx = struct.unpack_from('<IBBH', self.image, o)
                 value, size = struct.unpack_from('<QQ', self.image, o + 8)
                 self.syms.append((self.cstr(strtab + name), info, shndx, value, size))
@@ -73,12 +132,18 @@ class Nso:
             if base_tag in dyn:
                 b, n = dyn[base_tag], dyn[size_tag] // 24
                 for i in range(n):
-                    r_off, r_info, r_add = struct.unpack_from('<QQq', self.image, b + i * 24)
+                    o = b + i * 24
+                    if o + 24 > len(self.image): break
+                    r_off, r_info, r_add = struct.unpack_from('<QQq', self.image, o)
                     self.relocs.append((r_off, r_info & 0xFFFFFFFF, r_info >> 32, r_add))
 
     def cstr(self, off):
-        end = self.image.index(b'\0', off)
-        return self.image[off:end].decode('utf-8', 'replace')
+        if off >= len(self.image): return ""
+        try:
+            end = self.image.index(b'\0', off)
+            return self.image[off:end].decode('utf-8', 'replace')
+        except ValueError:
+            return ""
 
     def imports(self):
         return [s for s in self.syms if s[0] and s[2] == 0]

@@ -4,14 +4,65 @@
 #include "recompiler/dispatch.h"
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace totk::runtime {
+
+#pragma pack(push, 1)
+struct NsoSegmentHeader {
+    uint32_t file_offset;
+    uint32_t memory_offset;
+    uint32_t size;
+};
+
+struct NsoHeader {
+    uint32_t magic; // "NSO0"
+    uint32_t version;
+    uint32_t reserved;
+    uint32_t flags;
+    NsoSegmentHeader segments[3]; // 0: text, 1: rodata, 2: data
+    uint32_t module_name_offset;
+    uint32_t module_name_size;
+    uint32_t bss_size;
+    uint8_t build_id[0x20];
+    uint32_t compressed_sizes[3];
+    uint8_t padding[0x24];
+    NsoSegmentHeader ext_segments[3];
+    uint8_t hashes[3][0x20];
+};
+#pragma pack(pop)
 
 struct ModuleFunctionSymbol {
     uint64_t guest_addr;
     totk::recompiler::RecompiledFunc fn;
     const char *name;
+};
+
+struct ElfRelocation {
+    uint64_t offset;
+    uint32_t type;
+    uint32_t sym_idx;
+    int64_t addend;
+};
+
+struct LoadedModule {
+    std::string name;
+    std::string path;
+    uint64_t base_addr = 0;
+    size_t size = 0;
+    uint32_t text_off = 0;
+    uint32_t text_size = 0;
+    uint32_t rodata_off = 0;
+    uint32_t rodata_size = 0;
+    uint32_t data_off = 0;
+    uint32_t data_size = 0;
+    uint32_t bss_size = 0;
+    std::string build_id;
+    std::unordered_map<std::string, uint64_t> exports;
+    std::vector<std::string> imports;
+    std::vector<ElfRelocation> relocations;
+    std::vector<uint64_t> relr_entries;
 };
 
 using ModuleRegisterFn = void (*)();
@@ -29,16 +80,28 @@ public:
     // Load a dynamic library (.so on Linux, .dll on Windows)
     bool load(const std::string &path);
 
-    // Unload the currently loaded module
+    // Load and decompress a raw Nintendo NSO0 binary into the 39-bit guest window
+    bool load_nso(const std::string &path, uint64_t base_addr, const std::string &module_name = "");
+
+    // Load NSO directly from memory buffer
+    bool load_nso_memory(const uint8_t *data, size_t size, uint64_t base_addr, const std::string &module_name = "");
+
+    // Apply ELF dynamic relocations across all loaded NSO modules
+    size_t apply_relocations();
+
+    // Resolve an exported guest symbol across loaded modules
+    uint64_t resolve_guest_symbol(const std::string &symbol_name) const;
+
+    // Unload the currently loaded module(s)
     void unload();
 
-    // Check if a module is currently loaded
-    bool is_loaded() const { return m_handle != nullptr; }
+    // Check if any module is loaded
+    bool is_loaded() const { return m_handle != nullptr || !m_loaded_modules.empty(); }
 
-    // Resolve an exported symbol by name
+    // Resolve an exported host symbol by name (for dynamic libraries)
     void *resolve_symbol(const std::string &symbol_name);
 
-    // Call standard registration functions (e.g. register_recompiled_functions)
+    // Call standard registration functions
     bool call_registration_hook(const std::string &hook_name = "register_recompiled_functions");
 
     // Register a batch of symbol mappings directly into the dispatch table
@@ -46,6 +109,9 @@ public:
 
     // Execute the entrypoint function
     bool execute_entrypoint(const std::string &entry_name, totk::recompiler::Arm64Context *ctx);
+
+    // Get loaded NSO modules
+    const std::vector<LoadedModule> &get_loaded_modules() const { return m_loaded_modules; }
 
     // Get the last error string
     const std::string &get_last_error() const { return m_last_error; }
@@ -57,10 +123,14 @@ public:
     static ModuleLoader &instance();
 
 private:
+    bool parse_and_map_nso(const uint8_t *raw, size_t raw_size, uint64_t base_addr, const std::string &module_name, const std::string &path);
+
     void *m_handle{nullptr};
     std::string m_module_path;
     std::string m_last_error;
     std::vector<std::string> m_registered_hooks;
+    std::vector<LoadedModule> m_loaded_modules;
+    std::unordered_map<std::string, uint64_t> m_global_symbols;
 };
 
 } // namespace totk::runtime

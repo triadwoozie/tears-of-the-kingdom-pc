@@ -7,6 +7,8 @@ zig-cache/
 zig-out/
 CMakeFiles/
 CMakeCache.txt
+__pycache__/
+*.pyc
 
 # Local workspace & scratch
 local/
