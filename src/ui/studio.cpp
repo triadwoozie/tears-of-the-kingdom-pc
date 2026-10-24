@@ -113,8 +113,32 @@ void Studio::render_rom_keys_tab() {
     ImGui::Separator();
     ImGui::Spacing();
 
-    // Verification Badges
-    ImGui::Text("Verification & Integrity Status:");
+    // Check live provenance.toml
+    bool has_provenance = false;
+    bool prov_all_matched = false;
+    FILE *pf = std::fopen("work/provenance.toml", "r");
+    if (pf) {
+        has_provenance = true;
+        char line[256];
+        while (std::fgets(line, sizeof(line), pf)) {
+            if (std::strstr(line, "all_matched = true")) prov_all_matched = true;
+        }
+        std::fclose(pf);
+    }
+
+    ImGui::Text("Cryptographic Provenance Status (SPEC-020 / SPEC-095):");
+    if (has_provenance) {
+        if (prov_all_matched) {
+            ImGui::TextColored(ImVec4(0.0f, 0.9f, 0.5f, 1.0f), "[PROVENANCE VERIFIED] All v1.4.3 NSO modules matched SHA-256 signatures.");
+        } else {
+            ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.20f, 1.0f), "[PROVENANCE PENDING] Awaiting user v1.4.3 ExeFS/NSP extraction in work/exefs/ or local/.");
+        }
+    } else {
+        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.65f, 1.0f), "[PROVENANCE NOT FOUND] Run tools/ingest_rom.py or click 'Run Recompile'.");
+    }
+
+    ImGui::Spacing();
+    ImGui::Text("Verification & Integrity Targets:");
     ImGui::Bullet();
     ImGui::Text("v1.4.3 Main Hash: ");
     ImGui::SameLine();

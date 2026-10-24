@@ -58,16 +58,23 @@ target_include_directories(imgui PUBLIC
 )
 target_link_libraries(imgui PUBLIC SDL3::SDL3 volk)
 
-# TotK Runtime Library
+# Platform Sources
 if(WIN32)
     set(PLATFORM_SOURCES src/runtime/platform/windows.c)
 else()
     set(PLATFORM_SOURCES src/runtime/platform/linux.c)
 endif()
 
+# TotK Runtime Library
 add_library(totk_recomp_runtime STATIC
     src/runtime/paths.c
     src/runtime/dispatch.c
+    src/runtime/memory_manager.cpp
+    src/runtime/kernel_hle.cpp
+    src/runtime/threads_hle.cpp
+    src/runtime/services_hle.cpp
+    src/runtime/filesystem_hle.cpp
+    src/runtime/hlr_sead.cpp
     ${PLATFORM_SOURCES}
 )
 target_include_directories(totk_recomp_runtime PUBLIC
@@ -79,6 +86,16 @@ target_link_libraries(totk_recomp_runtime PUBLIC SDL3::SDL3)
 if(NOT MSVC)
     target_link_libraries(totk_recomp_runtime PUBLIC m dl pthread)
 endif()
+
+# TotK Recompiler Library
+add_library(totk_recomp_recompiler STATIC
+    src/recompiler/dispatch.cpp
+)
+target_include_directories(totk_recomp_recompiler PUBLIC
+    src/
+    src/runtime/
+    ${SIMDE_INCLUDE_DIR}
+)
 
 # TotK Graphics Library
 add_library(totk_recomp_graphics STATIC
@@ -121,6 +138,7 @@ target_link_libraries(totk_recomp PRIVATE
     totk_recomp_ui
     totk_recomp_graphics
     totk_recomp_runtime
+    totk_recomp_recompiler
     imgui
     volk
     SDL3::SDL3
@@ -128,3 +146,30 @@ target_link_libraries(totk_recomp PRIVATE
 if(NOT MSVC)
     target_link_libraries(totk_recomp PRIVATE m dl pthread)
 endif()
+
+# ==============================================================================
+# Testing Suite (CTest)
+# ==============================================================================
+enable_testing()
+
+function(add_totk_test TEST_NAME TEST_SRC)
+    add_executable(${TEST_NAME} ${TEST_SRC})
+    target_include_directories(${TEST_NAME} PRIVATE
+        src/
+        src/runtime/
+        ${SIMDE_INCLUDE_DIR}
+    )
+    target_link_libraries(${TEST_NAME} PRIVATE
+        totk_recomp_runtime
+        totk_recomp_recompiler
+    )
+    if(NOT MSVC)
+        target_link_libraries(${TEST_NAME} PRIVATE m dl pthread)
+    endif()
+    add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
+endfunction()
+
+add_totk_test(test_abi_structs tests/test_abi_structs.cpp)
+add_totk_test(test_memory_window tests/test_memory_window.cpp)
+add_totk_test(test_lifter_neon tests/test_lifter_neon.cpp)
+add_totk_test(test_kernel_sync tests/test_kernel_sync.cpp)

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""TotK-Recomp ROM & ExeFS Ingestion Tool.
+"""TotK-Recomp ROM & ExeFS Ingestion Tool with Cryptographic Provenance (SPEC-020 / SPEC-095).
 
 Validates user-provided game packages or extracted folders against
-The Legend of Zelda: Tears of the Kingdom v1.4.3 module fingerprints.
-Zero proprietary keys or assets are bundled.
+The Legend of Zelda: Tears of the Kingdom v1.4.3 module fingerprints,
+and outputs work/provenance.toml. Zero proprietary keys or assets are bundled.
 """
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -19,6 +20,12 @@ EXPECTED_V143_HASHES = {
     'main': 'e84a90d551fed0824b4b74933b9c6d043c458521363a7cea58b2faca1822dc9e',
     'subsdk0': '767c35bcd7d23e78f9063c69b638290b8b83f91e839beb10799e6576960179b1',
     'sdk': '1d187f29784cd0af46e9e123fc2a62c77b3b07c5a39c8633d90d6c80de64e4ad'
+}
+
+EXPECTED_BUILD_IDS = {
+    'main': '277178b7dba1b6d4949a84778d4abc58',
+    'subsdk0': '3bb8d7455d3f2824cf40b3c67537bfa2',
+    'sdk': '68da6c99cbb281fbfb147eececaecb90'
 }
 
 
@@ -53,8 +60,49 @@ def parse_pfs0(stream, start_offset: int = 0) -> dict[str, tuple[int, int]]:
     return files
 
 
+def write_provenance_toml(output_path: Path, module_info: dict, all_matched: bool):
+    """Write SPEC-020 / SPEC-095 compliant provenance.toml."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    lines = [
+        '# SPEC-020 / SPEC-095 Cryptographic Provenance Manifest',
+        'schema_version = "1"',
+        '',
+        '[title]',
+        'name = "The Legend of Zelda: Tears of the Kingdom"',
+        'title_id = "0100F2C0115B6000"',
+        'version = "1.4.3"',
+        'region = "Global"',
+        '',
+        '[collection]',
+        'device = "user-provided dump"',
+        f'collected_at = "{now_iso}"',
+        'tool_name = "TotK-Recomp Ingest"',
+        'tool_version = "1.0.0"',
+        '',
+        '[verification]',
+        f'all_matched = {"true" if all_matched else "false"}',
+        f'verified_at = "{now_iso}"',
+        ''
+    ]
+
+    for name, info in module_info.items():
+        lines.append('[[inputs]]')
+        lines.append(f'role = "{name}"')
+        lines.append(f'path = "{info.get("path") or "unresolved"}"')
+        lines.append(f'sha256 = "{info.get("sha256") or ""}"')
+        lines.append(f'size = {info.get("size", 0)}')
+        lines.append(f'format = "nso0"')
+        lines.append(f'matches_expected = {"true" if info.get("matches", False) else "false"}')
+        lines.append(f'build_id = "{EXPECTED_BUILD_IDS.get(name, "")}"')
+        lines.append('')
+
+    output_path.write_text('\n'.join(lines), encoding='utf-8')
+    print(f"[Provenance] Wrote cryptographic provenance manifest to {output_path}")
+
+
 def inspect_path(path: Path) -> dict:
-    """Inspect a directory or file and return detected status."""
     result = {
         'path': str(path),
         'exists': path.exists(),
@@ -70,7 +118,6 @@ def inspect_path(path: Path) -> dict:
 
     try:
         if path.is_dir():
-            # Check for direct module files or exefs folder
             search_dirs = [path, path / 'exefs']
             for name, expected_hash in EXPECTED_V143_HASHES.items():
                 target = None
@@ -86,20 +133,21 @@ def inspect_path(path: Path) -> dict:
 
                 if target:
                     digest = sha256_file(target)
+                    file_size = target.stat().st_size
                     result['modules'][name] = {
                         'path': str(target),
                         'sha256': digest,
+                        'size': file_size,
                         'matches': digest == expected_hash
                     }
                 else:
-                    result['modules'][name] = {'path': None, 'sha256': None, 'matches': False}
+                    result['modules'][name] = {'path': None, 'sha256': None, 'size': 0, 'matches': False}
 
             result['valid_v143'] = all(
                 info['matches'] for info in result['modules'].values()
             )
 
         elif path.is_file():
-            # Attempt to read PFS0 / NSP header
             with open(path, 'rb') as f:
                 entries = parse_pfs0(f)
                 result['pfs0_entries'] = list(entries.keys())
@@ -114,29 +162,30 @@ def inspect_path(path: Path) -> dict:
 def main():
     parser = argparse.ArgumentParser(description="TotK-Recomp ROM & ExeFS Ingestion Inspector")
     parser.add_argument('--path', type=str, help="Path to ROM file (.nsp) or extracted ExeFS directory")
+    parser.add_argument('--provenance-out', type=str, default="work/provenance.toml", help="Path to write provenance.toml")
     parser.add_argument('--json', action='store_true', help="Output results in JSON format")
     args = parser.parse_args()
 
-    if not args.path:
-        # Default check against work/exefs
-        default_work = Path("work/exefs")
-        res = inspect_path(default_work)
-    else:
-        res = inspect_path(Path(args.path))
+    target_path = Path(args.path) if args.path else Path("work/exefs")
+    res = inspect_path(target_path)
+
+    # Always generate/update provenance.toml
+    prov_path = Path(args.provenance_out)
+    write_provenance_toml(prov_path, res['modules'], res['valid_v143'])
 
     if args.json:
         print(json.dumps(res, indent=2))
     else:
         print(f"=== TotK-Recomp ROM Ingestion Status ===")
-        print(f"Target Path: {res['path']}")
-        print(f"Exists:      {res['exists']}")
+        print(f"Target Path:     {res['path']}")
+        print(f"Exists:          {res['exists']}")
         if res.get('error'):
-            print(f"Notice:      {res['error']}")
+            print(f"Notice:          {res['error']}")
         if res['modules']:
             print("Detected ExeFS Modules:")
             for mod, data in res['modules'].items():
                 status = "MATCH [v1.4.3]" if data['matches'] else ("MISMATCH" if data['sha256'] else "NOT FOUND")
-                print(f"  - {mod:8s}: {status} (hash: {data['sha256'] or 'none'})")
+                print(f"  - {mod:8s}: {status} (hash: {data['sha256'] or 'none'}, size: {data['size']} B)")
         print(f"v1.4.3 Verified: {'YES' if res['valid_v143'] else 'NO'}")
 
 
