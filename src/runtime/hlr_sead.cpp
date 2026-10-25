@@ -1457,6 +1457,43 @@ void register_sead_hlr_hooks() {
         s_orig_7104707ff0(c);
     });
 
+    // Guard f_7104708180 against invalid container and heap pointers.
+    static totk::recompiler::RecompiledFunc s_orig_7104708180 =
+        totk::recompiler::lookup_recompiled_func(0x7104708180ULL);
+    totk::recompiler::register_recompiled_func(0x7104708180ULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = totk::runtime::GUEST_MEMORY_BASE;
+        constexpr uint64_t guest_limit = totk::runtime::GUEST_MEMORY_LIMIT;
+        constexpr uint64_t max_elements = 0x100000;
+        auto &memory = totk::runtime::MemoryManager::instance();
+        auto valid_guest_range = [&memory](uint64_t address, uint64_t size) {
+            return memory.get_guest_base() != nullptr &&
+                   address >= guest_base && address <= guest_limit &&
+                   size <= guest_limit - address &&
+                   memory.commit(address, static_cast<size_t>(size));
+        };
+
+        const bool invalid_container = !valid_guest_range(c->x[0], 0x48);
+        const bool invalid_heap = !valid_guest_range(c->x[2], sizeof(uint64_t));
+        if (invalid_container || invalid_heap || !s_orig_7104708180) {
+            if (invalid_container) {
+                c->x[0] = hlr_bump_alloc(0x50, 0x10);
+            }
+            if (invalid_heap) {
+                c->x[2] = get_default_heap();
+            }
+
+            c->x[1] = std::min(c->x[1], max_elements);
+            const uint64_t safe_buf =
+                hlr_bump_alloc(std::max<uint64_t>(c->x[1], 1) * sizeof(uint64_t), 0x10);
+            *reinterpret_cast<uint64_t *>(c->x[0] + 0x38) = c->x[1];
+            *reinterpret_cast<uint64_t *>(c->x[0] + 0x40) = safe_buf;
+            c->pc = c->x[30];
+            return;
+        }
+
+        s_orig_7104708180(c);
+    });
+
     // Guard f_71046f038c (agl layer setup)
     totk::recompiler::register_recompiled_func(0x71046f038cULL, [](Arm64Context *c) {
         std::printf("  [HLR Hook] f_71046f038c (agl layer setup) -> clean return\n");
