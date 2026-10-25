@@ -2010,6 +2010,12 @@ void register_sead_hlr_hooks() {
         }
     });
 
+    // Guard f_7104a623dc (SEAD resource / event registration)
+    totk::recompiler::register_recompiled_func(0x7104a623dcULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+    });
+
     // Guard f_7104a24ed4 (heap/allocator property query)
     totk::recompiler::register_recompiled_func(0x7104a24ed4ULL, [](Arm64Context *c) {
         if (c->x[0] >= 0x7000000000ULL && c->x[0] < 0x7300000000ULL) {
