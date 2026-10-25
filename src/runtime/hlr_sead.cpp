@@ -1357,7 +1357,7 @@ void register_sead_hlr_hooks() {
     // Guard f_71050e35f0 (instance query)
     totk::recompiler::register_recompiled_func(0x71050e35f0ULL, [](Arm64Context *c) {
         if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
-            c->x[0] = 0;
+            c->x[0] = 1;
         } else {
             uint64_t p = *reinterpret_cast<uint64_t *>(c->x[0] + 0x68);
             if (p >= 0x7000000000ULL && p < 0x7300000000ULL) {
