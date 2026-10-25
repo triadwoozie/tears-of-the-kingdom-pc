@@ -146,6 +146,25 @@ void register_sead_hlr_hooks() {
         c->pc = c->x[30];
     });
 
+    totk::recompiler::register_recompiled_func(0x71049c8eccULL, [](Arm64Context *c) {
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   c->x[0], 0xa9)) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint8_t flag = 0;
+        std::memcpy(&flag, reinterpret_cast<const void *>(c->x[0] + 0xa8),
+                    sizeof(flag));
+        if (flag & 1) {
+            c->x[0] = c->x[0] + 0x68;
+        } else {
+            c->x[0] = 0;
+        }
+        c->pc = c->x[30];
+    });
+
     // Avoid the original indirect calls, repairing missing sead singleton
     // instances or vtables with no-op dummy objects when guest memory is ready.
     totk::recompiler::register_recompiled_func(0x7104531f4cULL, [](Arm64Context *c) {
