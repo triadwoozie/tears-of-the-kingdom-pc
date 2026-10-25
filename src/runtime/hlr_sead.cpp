@@ -78,6 +78,35 @@ static void hlr_alloc_hook(totk::recompiler::Arm64Context *c) {
 void register_sead_hlr_hooks() {
     using totk::recompiler::Arm64Context;
 
+    static totk::recompiler::RecompiledFunc s_orig_71043792d0 =
+        totk::recompiler::lookup_recompiled_func(0x71043792d0ULL);
+    totk::recompiler::register_recompiled_func(0x71043792d0ULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = 0x7000000000ULL;
+        constexpr uint64_t guest_limit = 0x7300000000ULL;
+
+        if (c->x[0] < guest_base || c->x[0] >= guest_limit) {
+            c->x[0] = 0xffffffff;
+            c->pc = c->x[30];
+            return;
+        }
+
+        const uint64_t obj22 = *reinterpret_cast<const uint64_t *>(c->x[0] + 0xd8);
+        if (obj22 >= guest_base && obj22 < guest_limit - 0x190) {
+            uint64_t *p_sub8 = reinterpret_cast<uint64_t *>(obj22 + 0x188);
+            if (*p_sub8 < guest_base || *p_sub8 >= guest_limit) {
+                static uint64_t s_safe_sub8 = hlr_bump_alloc(0x1000, 0x10);
+                *p_sub8 = s_safe_sub8;
+            }
+        }
+
+        if (s_orig_71043792d0) {
+            s_orig_71043792d0(c);
+        } else {
+            c->x[0] = 0xffffffff;
+            c->pc = c->x[30];
+        }
+    });
+
     // Guard f_71046f4818 against invalid object pointers and offsets.
     totk::recompiler::register_recompiled_func(0x71046f4818ULL, [](Arm64Context *c) {
         constexpr uint64_t guest_base = 0x7000000000ULL;
