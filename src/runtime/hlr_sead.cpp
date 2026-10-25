@@ -1494,6 +1494,61 @@ void register_sead_hlr_hooks() {
         s_orig_7104708180(c);
     });
 
+    // Skip SEAD table setup when its container is null or outside guest memory.
+    static totk::recompiler::RecompiledFunc s_orig_7104707f6c =
+        totk::recompiler::lookup_recompiled_func(0x7104707f6cULL);
+    totk::recompiler::register_recompiled_func(0x7104707f6cULL, [](Arm64Context *c) {
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (c->x[0] == 0 || memory.get_guest_base() == nullptr ||
+            !memory.is_in_guest_range(c->x[0]) ||
+            !memory.commit(c->x[0], sizeof(uint64_t))) {
+            c->pc = c->x[30];
+            return;
+        }
+
+        if (s_orig_7104707f6c) {
+            s_orig_7104707f6c(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_7104708290 =
+        totk::recompiler::lookup_recompiled_func(0x7104708290ULL);
+    totk::recompiler::register_recompiled_func(0x7104708290ULL, [](Arm64Context *c) {
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (c->x[0] == 0 || memory.get_guest_base() == nullptr ||
+            !memory.is_in_guest_range(c->x[0]) ||
+            !memory.commit(c->x[0], sizeof(uint64_t))) {
+            c->pc = c->x[30];
+            return;
+        }
+
+        if (s_orig_7104708290) {
+            s_orig_7104708290(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_71047083a0 =
+        totk::recompiler::lookup_recompiled_func(0x71047083a0ULL);
+    totk::recompiler::register_recompiled_func(0x71047083a0ULL, [](Arm64Context *c) {
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (c->x[0] == 0 || memory.get_guest_base() == nullptr ||
+            !memory.is_in_guest_range(c->x[0]) ||
+            !memory.commit(c->x[0], sizeof(uint64_t))) {
+            c->pc = c->x[30];
+            return;
+        }
+
+        if (s_orig_71047083a0) {
+            s_orig_71047083a0(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
     // Guard f_71046f038c (agl layer setup)
     totk::recompiler::register_recompiled_func(0x71046f038cULL, [](Arm64Context *c) {
         std::printf("  [HLR Hook] f_71046f038c (agl layer setup) -> clean return\n");
