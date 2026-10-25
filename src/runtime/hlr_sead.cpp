@@ -2,6 +2,7 @@
 #include "recompiler/dispatch.h"
 #include "recompiler/arm64_ctx.h"
 #include "runtime/memory_manager.h"
+#include <algorithm>
 #include <cmath>
 #include <immintrin.h>
 #include <cstdio>
@@ -1224,6 +1225,20 @@ void register_sead_hlr_hooks() {
         }
         if (s_orig_7104154bd0) {
             s_orig_7104154bd0(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
+    // Clamp the SEAD/gsys lock table count before allocating mutex entries.
+    static totk::recompiler::RecompiledFunc s_orig_7104cccf80 =
+        totk::recompiler::lookup_recompiled_func(0x7104cccf80ULL);
+    totk::recompiler::register_recompiled_func(0x7104cccf80ULL, [](Arm64Context *c) {
+        if (c->x[2] > 64ULL) {
+            c->x[2] = std::min<uint64_t>(c->x[2], 64ULL);
+        }
+        if (s_orig_7104cccf80) {
+            s_orig_7104cccf80(c);
         } else {
             c->pc = c->x[30];
         }
