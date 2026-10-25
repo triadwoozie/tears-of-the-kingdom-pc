@@ -119,6 +119,11 @@ static void hlr_alloc_hook(totk::recompiler::Arm64Context *c) {
 void register_sead_hlr_hooks() {
     using totk::recompiler::Arm64Context;
 
+    totk::recompiler::register_recompiled_func(0x710415fb70ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+    });
+
     // Avoid the original indirect calls, repairing missing sead singleton
     // instances or vtables with no-op dummy objects when guest memory is ready.
     totk::recompiler::register_recompiled_func(0x7104531f4cULL, [](Arm64Context *c) {
