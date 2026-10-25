@@ -193,6 +193,71 @@ void register_sead_hlr_hooks() {
         }
     });
 
+    static totk::recompiler::RecompiledFunc s_orig_7104338564 =
+        totk::recompiler::lookup_recompiled_func(0x7104338564ULL);
+    totk::recompiler::register_recompiled_func(0x7104338564ULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = 0x7000000000ULL;
+        constexpr uint64_t guest_limit = 0x7300000000ULL;
+        auto fail = [c]() {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+        };
+
+        const uint64_t node = c->x[0];
+        if (node < guest_base || node >= guest_limit) {
+            fail();
+            return;
+        }
+        if (node > guest_limit - 0x18) {
+            fail();
+            return;
+        }
+
+        const uint64_t vtable = *reinterpret_cast<const uint64_t *>(node);
+        if (vtable < guest_base || vtable >= guest_limit - 0x100) {
+            fail();
+            return;
+        }
+
+        uint64_t *const fn_slot = reinterpret_cast<uint64_t *>(vtable + 0x80);
+        if (*fn_slot < 0x7100000000ULL || *fn_slot >= 0x7110000000ULL) {
+            *fn_slot = 0x71068eb97cULL;
+        }
+
+        const uint64_t next = *reinterpret_cast<const uint64_t *>(node + 0x10);
+        static thread_local std::unordered_set<uint64_t> visited_nodes;
+        static thread_local size_t recursion_depth = 0;
+        if (recursion_depth >= 32 || visited_nodes.contains(node)) {
+            fail();
+            return;
+        }
+
+        struct RecursionGuard {
+            std::unordered_set<uint64_t> &visited;
+            size_t &depth;
+            uint64_t node;
+
+            ~RecursionGuard() {
+                visited.erase(node);
+                --depth;
+            }
+        };
+
+        visited_nodes.insert(node);
+        ++recursion_depth;
+        RecursionGuard recursion_guard{visited_nodes, recursion_depth, node};
+        if (next != 0 && visited_nodes.contains(next)) {
+            fail();
+            return;
+        }
+
+        if (s_orig_7104338564) {
+            s_orig_7104338564(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
     // Hook universal sead::Heap::alloc (0x710406a920)
     totk::recompiler::register_recompiled_func(0x710406a920ULL, hlr_alloc_hook);
 
