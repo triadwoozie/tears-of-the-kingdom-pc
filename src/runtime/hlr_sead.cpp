@@ -1641,6 +1641,13 @@ void register_sead_hlr_hooks() {
         c->pc = c->x[30];
     });
 
+    // Bypass f_7104ccdcd4 to avoid dereferencing a null lookup result.
+    totk::recompiler::register_recompiled_func(0x7104ccdcd4ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
     static totk::recompiler::RecompiledFunc s_orig_71047083a0 =
         totk::recompiler::lookup_recompiled_func(0x71047083a0ULL);
     totk::recompiler::register_recompiled_func(0x71047083a0ULL, [](Arm64Context *c) {
