@@ -6,8 +6,8 @@
 namespace totk::runtime {
 
 constexpr uint64_t GUEST_MEMORY_BASE = 0x7000000000ull;
-constexpr uint64_t GUEST_MEMORY_LIMIT = 0x7320000000ull;
-constexpr size_t GUEST_MEMORY_SIZE = GUEST_MEMORY_LIMIT - GUEST_MEMORY_BASE; // 12.5 GiB
+constexpr uint64_t GUEST_MEMORY_LIMIT = 0x7400000000ull;
+constexpr size_t GUEST_MEMORY_SIZE = GUEST_MEMORY_LIMIT - GUEST_MEMORY_BASE; // 16 GiB
 
 class MemoryManager {
 public:
