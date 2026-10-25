@@ -78,6 +78,40 @@ static void hlr_alloc_hook(totk::recompiler::Arm64Context *c) {
 void register_sead_hlr_hooks() {
     using totk::recompiler::Arm64Context;
 
+    // Guard f_71046f4818 against invalid object pointers and offsets.
+    totk::recompiler::register_recompiled_func(0x71046f4818ULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = 0x7000000000ULL;
+        constexpr uint64_t guest_limit = 0x7300000000ULL;
+        auto valid_range = [](uint64_t addr, uint64_t size) {
+            return addr >= guest_base && addr <= guest_limit &&
+                   size <= guest_limit - addr;
+        };
+
+        const uint64_t table_address =
+            0x7106cf1d58ULL + ((c->x[1] & 0xffffffffULL) << 3);
+        if (!valid_range(c->x[0], 1) || !valid_range(table_address, sizeof(uint64_t))) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+
+        const uint64_t offset = *reinterpret_cast<const uint64_t *>(table_address);
+        if (offset > UINT64_MAX - c->x[0]) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+
+        const uint64_t value_address = c->x[0] + offset;
+        if (!valid_range(value_address, sizeof(uint64_t))) {
+            c->x[0] = 0;
+        } else {
+            const uint64_t value = *reinterpret_cast<const uint64_t *>(value_address);
+            c->x[0] = valid_range(value, 1) ? value : 0;
+        }
+        c->pc = c->x[30];
+    });
+
     static totk::recompiler::RecompiledFunc s_orig_710472fbd0 =
         totk::recompiler::lookup_recompiled_func(0x710472fbd0ULL);
     totk::recompiler::register_recompiled_func(0x710472fbd0ULL, [](Arm64Context *c) {
