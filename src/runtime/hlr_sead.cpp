@@ -1375,8 +1375,10 @@ void register_sead_hlr_hooks() {
     static totk::recompiler::RecompiledFunc s_orig_get_first_block =
         totk::recompiler::lookup_recompiled_func(0x7106bb7b00ULL);
     totk::recompiler::register_recompiled_func(0x7106bb7b00ULL, [](Arm64Context *c) {
+        static uint64_t s_safe_first_block = 0;
+        if (s_safe_first_block == 0) s_safe_first_block = hlr_bump_alloc(0x200, 0x20);
         if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
-            c->x[0] = 0;
+            c->x[0] = s_safe_first_block;
             c->pc = c->x[30];
             return;
         }
