@@ -1565,6 +1565,68 @@ void register_sead_hlr_hooks() {
         c->pc = c->x[30];
     });
 
+    // Guard f_7104cca050 (string table lookup)
+    static totk::recompiler::RecompiledFunc s_orig_7104cca050 =
+        totk::recompiler::lookup_recompiled_func(0x7104cca050ULL);
+    totk::recompiler::register_recompiled_func(0x7104cca050ULL, [](Arm64Context *c) {
+        constexpr uint64_t object_size = 0x2bc;
+        constexpr uint64_t table_offset = 0x2b0;
+        constexpr uint32_t max_entries = 128;
+        constexpr uint64_t guest_base = totk::runtime::GUEST_MEMORY_BASE;
+        constexpr uint64_t guest_limit = totk::runtime::GUEST_MEMORY_LIMIT;
+        auto &memory = totk::runtime::MemoryManager::instance();
+
+        auto valid_range = [&memory](uint64_t address, uint64_t size) {
+            return address >= guest_base && address <= guest_limit &&
+                   size <= guest_limit - address &&
+                   memory.commit(address, static_cast<size_t>(size));
+        };
+        auto clear_outputs = [&c, &valid_range]() {
+            for (uint64_t output : {c->x[1], c->x[2]}) {
+                if (output != 0 && valid_range(output, sizeof(uint64_t))) {
+                    *reinterpret_cast<uint64_t *>(output) = 0;
+                }
+            }
+        };
+        auto return_empty = [&c, &clear_outputs]() {
+            clear_outputs();
+            c->pc = c->x[30];
+        };
+
+        const uint64_t object = c->x[0];
+        if (c->x[1] == 0 || c->x[2] == 0 ||
+            !valid_range(c->x[1], sizeof(uint64_t)) ||
+            !valid_range(c->x[2], sizeof(uint64_t)) ||
+            !valid_range(object, object_size)) {
+            return_empty();
+            return;
+        }
+
+        auto *count_ptr = reinterpret_cast<uint32_t *>(object + 0x2b8);
+        *count_ptr = std::min<uint32_t>(*count_ptr, max_entries);
+        const uint32_t count = *count_ptr;
+        const uint64_t table = *reinterpret_cast<uint64_t *>(object + table_offset);
+
+        if (table == 0 ||
+            !valid_range(table, static_cast<uint64_t>(count) * sizeof(uint64_t))) {
+            return_empty();
+            return;
+        }
+        for (uint32_t i = 0; i < count; ++i) {
+            const uint64_t string = *reinterpret_cast<uint64_t *>(table + i * sizeof(uint64_t));
+            if (string == 0 || !valid_range(string, 1)) {
+                return_empty();
+                return;
+            }
+        }
+
+        if (s_orig_7104cca050) {
+            s_orig_7104cca050(c);
+        } else {
+            return_empty();
+        }
+    });
+
     // Guard f_7105128a40 (node lookup in descriptor tree -> safe empty node)
     static totk::recompiler::RecompiledFunc s_orig_7105128a40 =
         totk::recompiler::lookup_recompiled_func(0x7105128a40ULL);
