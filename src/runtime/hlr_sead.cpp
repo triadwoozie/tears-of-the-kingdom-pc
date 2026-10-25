@@ -445,6 +445,31 @@ void register_sead_hlr_hooks() {
         return;
     });
 
+    // Hook the remaining audio renderer query helpers.
+    totk::recompiler::register_recompiled_func(0x710c1f6b50ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    totk::recompiler::register_recompiled_func(0x710c1f61a0ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    totk::recompiler::register_recompiled_func(0x710c1f6c10ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    totk::recompiler::register_recompiled_func(0x710c1f6c70ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
     // Hook nn::oe::Initialize (0x710c407930)
     totk::recompiler::register_recompiled_func(0x710c407930ULL, [](Arm64Context *c) {
         c->x[0] = 0;
