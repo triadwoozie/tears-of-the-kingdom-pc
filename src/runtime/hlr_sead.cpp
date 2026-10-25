@@ -1205,6 +1205,32 @@ void register_sead_hlr_hooks() {
             c->pc = c->x[30];
         }
     });
+
+    // Guard f_710437bb60 against invalid object pointers
+    static totk::recompiler::RecompiledFunc s_orig_710437bb60 =
+        totk::recompiler::lookup_recompiled_func(0x710437bb60ULL);
+    totk::recompiler::register_recompiled_func(0x710437bb60ULL, [](Arm64Context *c) {
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+        if (s_orig_710437bb60) s_orig_710437bb60(c);
+        else c->pc = c->x[30];
+    });
+
+    // Guard nn::util::BinaryFileHeader::GetFirstBlock against invalid object pointers
+    static totk::recompiler::RecompiledFunc s_orig_get_first_block =
+        totk::recompiler::lookup_recompiled_func(0x7106bb7b00ULL);
+    totk::recompiler::register_recompiled_func(0x7106bb7b00ULL, [](Arm64Context *c) {
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+        if (s_orig_get_first_block) s_orig_get_first_block(c);
+        else c->pc = c->x[30];
+    });
 }
 
 void sead_matrix34f_mult(const sead::Matrix34f &m, const sead::Vector3f &v, sead::Vector3f &out) {
