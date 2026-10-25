@@ -1451,14 +1451,29 @@ void register_sead_hlr_hooks() {
         totk::recompiler::lookup_recompiled_func(0x7106bb7b00ULL);
     totk::recompiler::register_recompiled_func(0x7106bb7b00ULL, [](Arm64Context *c) {
         static uint64_t s_safe_first_block = 0;
-        if (s_safe_first_block == 0) s_safe_first_block = hlr_bump_alloc(0x200, 0x20);
+        if (s_safe_first_block == 0) {
+            s_safe_first_block = hlr_bump_alloc(0x1000, 0x20);
+            *reinterpret_cast<uint64_t *>(s_safe_first_block + 0x20) = s_safe_first_block + 0x200;
+            *reinterpret_cast<uint8_t *>(s_safe_first_block + 0x110) = 1;
+        }
         if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
             c->x[0] = s_safe_first_block;
             c->pc = c->x[30];
             return;
         }
         if (s_orig_get_first_block) s_orig_get_first_block(c);
-        else c->pc = c->x[30];
+        else c->x[0] = s_safe_first_block;
+
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
+            c->x[0] = s_safe_first_block;
+        }
+        uint64_t data_ptr = *reinterpret_cast<uint64_t *>(c->x[0] + 0x20);
+        if (data_ptr < 0x7000000000ULL || data_ptr >= 0x7300000000ULL) {
+            data_ptr = hlr_bump_alloc(0x1000, 0x20);
+            *reinterpret_cast<uint64_t *>(c->x[0] + 0x20) = data_ptr;
+        }
+        *reinterpret_cast<uint8_t *>(c->x[0] + 0x110) = 1;
+        c->pc = c->x[30];
     });
 }
 
