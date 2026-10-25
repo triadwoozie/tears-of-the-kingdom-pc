@@ -78,6 +78,23 @@ static void hlr_alloc_hook(totk::recompiler::Arm64Context *c) {
 void register_sead_hlr_hooks() {
     using totk::recompiler::Arm64Context;
 
+    static totk::recompiler::RecompiledFunc s_orig_71068ff3f0 =
+        totk::recompiler::lookup_recompiled_func(0x71068ff3f0ULL);
+    totk::recompiler::register_recompiled_func(0x71068ff3f0ULL, [](Arm64Context *c) {
+        if (c->x[2] < 0x7000000000ULL || c->x[2] >= 0x7300000000ULL) {
+            uint64_t sz = (c->x[0] > 0 && c->x[0] < 0x10000000ULL) ? c->x[0] : 0x1000;
+            c->x[0] = hlr_bump_alloc(sz, 16);
+            c->pc = c->x[30];
+            return;
+        }
+        if (s_orig_71068ff3f0) s_orig_71068ff3f0(c);
+        else {
+            uint64_t sz = (c->x[0] > 0 && c->x[0] < 0x10000000ULL) ? c->x[0] : 0x1000;
+            c->x[0] = hlr_bump_alloc(sz, 16);
+            c->pc = c->x[30];
+        }
+    });
+
     // Hook universal sead::Heap::alloc (0x710406a920)
     totk::recompiler::register_recompiled_func(0x710406a920ULL, hlr_alloc_hook);
 
