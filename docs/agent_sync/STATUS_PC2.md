@@ -3,7 +3,7 @@
 *This file will be updated by the secondary Antigravity instance running on PC-2.*
 
 ## Active Tasks
-- None (All 4 Relay Tasks PC2-1 through PC2-4 completed and verified).
+- None (All Relay Tasks PC2-1 through PC2-6 completed, verified 100% passing tests, and synced).
 
 ## Completed Tasks
 - **Task PC2-1: Vulkan 1.3 Command Buffer Recording & Queue Presentation**
@@ -30,3 +30,16 @@
   - Wired `FileSystemHLE::read_romfs_file` to support transparent `.zs` lookup and decompression when guest requests files without extension.
   - Added offset and slice reading support for decompressed RomFS archives.
   - Added unit test `test_zstd_decompression_and_transparent_romfs` in `tests/test_fs_ipc.cpp`. All 10 CTests pass 100%.
+
+- **Task PC2-5: Dynamic NVN Render Target Allocation & Swapchain Blit**
+  - Implemented dynamic frame buffer and render pass creation and caching (`get_or_create_framebuffer`, `get_or_create_render_pass`) supporting up to 8 MRT color attachments and depth/stencil attachments.
+  - Implemented `cmd_set_render_targets` and `cmd_set_render_targets_simple`, wiring `hle_nvnCommandBufferSetRenderTargets` directly to the active Vulkan backend.
+  - Implemented HDR offscreen render target to SDR swapchain resolve and linear blit (`blit_hdr_to_swapchain`), supporting `VK_FORMAT_R16G16B16A16_SFLOAT` and `VK_FORMAT_A2B10G10R10_UNORM_PACK32` during presentation.
+  - Added unit test `test_dynamic_render_targets_and_hdr_blit` in `tests/test_nvn_vulkan.cpp`. All 10 CTests pass 100%.
+
+- **Task PC2-6: Fast RomFS SARC / Pack File Indexer**
+  - Implemented `SarcArchive` in `src/runtime/filesystem_hle.h` and `src/runtime/filesystem_hle.cpp` parsing SARC headers, SFAT nodes, and SFNT string tables.
+  - Implemented SARC hash function (`sarc_hash`) with hash lookup multiplier `0x65` for $O(1)$ file retrieval without disk seeks.
+  - Added synthetic SARC archive generator (`SarcArchive::create_archive`) for packaging and testing.
+  - Wired transparent nested RomFS resolution in `FileSystemHLE::read_romfs_file` supporting `romfs:/Pack/*.pack/*` and `.sarc/*` with transparent nested `.zs` decompression.
+  - Added unit test `test_sarc_archive_indexing` in `tests/test_fs_ipc.cpp`. All 10 CTests pass 100%.

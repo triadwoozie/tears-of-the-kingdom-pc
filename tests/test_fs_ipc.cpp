@@ -132,6 +132,98 @@ void test_zstd_decompression_and_transparent_romfs() {
     std::printf("  -> Zstandard Frame & Transparent RomFS Decompression: PASSED\n");
 }
 
+void test_sarc_archive_indexing() {
+    std::printf("[Test] Running test_sarc_archive_indexing...\n");
+
+    // 1. Create a synthetic SARC archive with multiple assets
+    const std::string file1_name = "Actor/Player.byml";
+    const std::string file1_data = "BYML_MAGIC_HEADER_PLAYER_EQUIPMENT_DATA";
+
+    const std::string file2_name = "System/Version.txt";
+    const std::string file2_data = "TotK v1.4.3 Desktop Recomp Build 2026";
+
+    const std::string file3_name = "Shader/sky.spv";
+    const std::string file3_data = "\x03\x02\x23\x07SPIRV_BYTECODE_SAMPLE";
+
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> files = {
+        {file1_name, {file1_data.begin(), file1_data.end()}},
+        {file2_name, {file2_data.begin(), file2_data.end()}},
+        {file3_name, {file3_data.begin(), file3_data.end()}}
+    };
+
+    std::vector<uint8_t> sarc_raw = totk::runtime::SarcArchive::create_archive(files);
+    assert(!sarc_raw.empty());
+
+    // 2. Parse the archive
+    totk::runtime::SarcArchive sarc;
+    bool parse_ok = sarc.parse(sarc_raw.data(), sarc_raw.size());
+    assert(parse_ok);
+    assert(sarc.get_file_count() == 3);
+
+    // 3. Query presence and hashes
+    assert(sarc.has_file("Actor/Player.byml"));
+    assert(sarc.has_file("System/Version.txt"));
+    assert(sarc.has_file("Shader/sky.spv"));
+    assert(!sarc.has_file("Missing/File.bin"));
+
+    uint32_t hash_file2 = totk::runtime::sarc_hash("System/Version.txt");
+    assert(sarc.has_file_hash(hash_file2));
+
+    // 4. File data extraction
+    std::vector<uint8_t> read_f1;
+    bool get_ok = sarc.get_file("Actor/Player.byml", read_f1);
+    assert(get_ok);
+    assert(read_f1.size() == file1_data.size());
+    assert(std::memcmp(read_f1.data(), file1_data.data(), file1_data.size()) == 0);
+
+    // Direct memory view
+    const uint8_t *view_ptr = nullptr;
+    size_t view_size = 0;
+    bool view_ok = sarc.get_file_view("Shader/sky.spv", view_ptr, view_size);
+    assert(view_ok);
+    assert(view_size == file3_data.size());
+    assert(std::memcmp(view_ptr, file3_data.data(), file3_data.size()) == 0);
+
+    // Hash lookup
+    const uint8_t *hash_view = nullptr;
+    size_t hash_size = 0;
+    bool hash_ok = sarc.get_file_by_hash(hash_file2, hash_view, hash_size);
+    assert(hash_ok);
+    assert(hash_size == file2_data.size());
+    assert(std::memcmp(hash_view, file2_data.data(), file2_data.size()) == 0);
+
+    // 5. Test FileSystemHLE transparent indexing via romfs:/Pack/*.pack/*
+    auto &fs = totk::runtime::FileSystemHLE::instance();
+    fs.mount_romfs("work/test_romfs");
+
+    // Write uncompressed pack archive to work/test_romfs/Pack/Bootup.pack
+    bool write_ok = fs.write_file("work/test_romfs/Pack/Bootup.pack", sarc_raw.data(), sarc_raw.size());
+    assert(write_ok);
+
+    std::vector<uint8_t> romfs_subfile;
+    bool sub_ok = fs.read_romfs_file("romfs:/Pack/Bootup.pack/Actor/Player.byml", 0, 0, romfs_subfile);
+    assert(sub_ok);
+    assert(romfs_subfile.size() == file1_data.size());
+    assert(std::memcmp(romfs_subfile.data(), file1_data.data(), file1_data.size()) == 0);
+
+    // 6. Test transparent Zstd-compressed pack archive: TitleBG.pack.zs
+    std::vector<uint8_t> compressed_sarc;
+    bool comp_ok = totk::runtime::ZstdDecompressor::compress_frame(sarc_raw.data(), sarc_raw.size(), compressed_sarc, 3);
+    assert(comp_ok);
+
+    bool write_zs = fs.write_file("work/test_romfs/Pack/TitleBG.pack.zs", compressed_sarc.data(), compressed_sarc.size());
+    assert(write_zs);
+
+    // Access file inside TitleBG.pack (without specifying .zs!)
+    std::vector<uint8_t> zs_subfile;
+    bool zs_sub_ok = fs.read_romfs_file("romfs:/Pack/TitleBG.pack/System/Version.txt", 0, 0, zs_subfile);
+    assert(zs_sub_ok);
+    assert(zs_subfile.size() == file2_data.size());
+    assert(std::memcmp(zs_subfile.data(), file2_data.data(), file2_data.size()) == 0);
+
+    std::printf("  -> SARC Table of Contents Parser & Fast Hash Indexer: PASSED\n");
+}
+
 int main() {
     std::printf("=====================================================\n");
     std::printf("  TotK-Recomp: Unit Test - FileSystem & IPC\n");
@@ -140,6 +232,7 @@ int main() {
     test_filesystem_operations();
     test_ipc_services();
     test_zstd_decompression_and_transparent_romfs();
+    test_sarc_archive_indexing();
 
     std::printf("\nAll FileSystem and IPC verification tests PASSED!\n");
     return 0;
