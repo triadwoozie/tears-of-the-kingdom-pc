@@ -1,4 +1,5 @@
 #include "nvn_texture_cache.h"
+#include "astc_decoder.h"
 #include <cstdio>
 #include <cstring>
 
@@ -81,10 +82,11 @@ CachedTexture *NvnTextureCache::get_or_create_texture(uint64_t guest_addr, uint3
 }
 
 void NvnTextureCache::decompress_astc_to_rgba8(const uint8_t *astc_in, uint8_t *rgba_out, uint32_t width, uint32_t height) {
-    // Software transcoding fallback for desktop platforms without ASTC hardware support
-    // Unpack blocks into 32-bit RGBA pixels
-    (void)astc_in;
-    if (rgba_out && width > 0 && height > 0) {
+    if (!astc_in || !rgba_out || width == 0 || height == 0) return;
+    uint32_t blocks_x = (width + 3) / 4;
+    uint32_t blocks_y = (height + 3) / 4;
+    size_t data_size = static_cast<size_t>(blocks_x) * blocks_y * 16;
+    if (!AstcDecoder::decompress_image(astc_in, data_size, width, height, 4, 4, rgba_out)) {
         std::memset(rgba_out, 0xFF, width * height * 4);
     }
 }

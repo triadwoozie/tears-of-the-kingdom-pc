@@ -109,12 +109,14 @@ add_library(totk_recomp_graphics STATIC
     src/graphics/nvn_uniform_snapshot.cpp
     src/graphics/nvn_conditional_draw.cpp
     src/graphics/nvn_texture_cache.cpp
+    src/graphics/astc_decoder.cpp
 )
 target_include_directories(totk_recomp_graphics PUBLIC
     src/
     ${VOLK_INCLUDE_DIR}
     ${VULKAN_HEADERS_INCLUDE_DIR}
     ${VMA_INCLUDE_DIR}
+    ${SIMDE_INCLUDE_DIR}
 )
 target_link_libraries(totk_recomp_graphics PUBLIC volk SDL3::SDL3)
 
@@ -194,3 +196,4 @@ add_totk_test(test_nvn_vulkan tests/test_nvn_vulkan.cpp)
 add_totk_test(test_audio_hid tests/test_audio_hid.cpp)
 add_totk_test(test_module_loader tests/test_module_loader.cpp)
 add_totk_test(test_fs_ipc tests/test_fs_ipc.cpp)
+add_totk_test(test_astc_decoder tests/test_astc_decoder.cpp)

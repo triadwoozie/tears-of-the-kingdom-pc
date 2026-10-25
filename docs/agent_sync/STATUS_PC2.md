@@ -3,7 +3,7 @@
 *This file will be updated by the secondary Antigravity instance running on PC-2.*
 
 ## Active Tasks
-- Task PC2-2: Fast CPU/Compute ASTC Texture Decompression Helper
+- Task PC2-3: Dear ImGui Studio Diagnostics & Config Serialization
 
 ## Completed Tasks
 - **Task PC2-1: Vulkan 1.3 Command Buffer Recording & Queue Presentation**
@@ -12,3 +12,9 @@
   - Wired NVN HLE entrypoints (`nvnCommandBufferDrawArrays`, `nvnCommandBufferDrawElements`, `nvnCommandBufferBindVertexBuffer`, `nvnCommandBufferBindUniformBuffer`, `nvnCommandBufferUpdateUniformBuffer`, `nvnCommandBufferSetViewport`, `nvnCommandBufferSetScissor`, `nvnCommandBufferClearColor`, and `nvnQueuePresentTexture`) to the active `VulkanBackend`.
   - Added image layout transition to `VK_IMAGE_LAYOUT_PRESENT_SRC_KHR` and swapchain queue presentation via `vkQueuePresentKHR`.
   - Added unit test `test_vulkan_command_recording_and_presentation` to `tests/test_nvn_vulkan.cpp`. All 8 CTests pass 100%.
+
+- **Task PC2-2: Fast CPU/Compute ASTC Texture Decompression Helper**
+  - Implemented `src/graphics/astc_decoder.h` and `src/graphics/astc_decoder.cpp` supporting 4x4, 5x5, 6x6, 8x8, 10x10, and 12x12 footprint blocks, decoding uncompressed ASTC LDR blocks into standard RGBA8 (`VK_FORMAT_R8G8B8A8_UNORM`).
+  - Integrated SIMDe SSE2/NEON vector arithmetic for parallel 4-pixel channel blending.
+  - Hooked `AstcDecoder::decompress_image` into `NvnTextureCache::decompress_astc_to_rgba8`.
+  - Added unit test `tests/test_astc_decoder.cpp` testing synthetic 4x4, 8x8 void-extent color blocks, linear gradients, and full 16x16 / 15x15 image decompression. All 9 CTests pass 100%.
