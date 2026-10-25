@@ -655,6 +655,12 @@ void register_sead_hlr_hooks() {
         c->pc = c->x[30];
     });
 
+    // Hook f_7104cb4a40 (system archive/resource package initializer)
+    totk::recompiler::register_recompiled_func(0x7104cb4a40ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+    });
+
     // Hook BootupBackgroundWorkThread (0x7104b574ac)
     totk::recompiler::register_recompiled_func(0x7104b574acULL, [](Arm64Context *c) {
         std::printf("  [HLR Hook] f_7104b574ac (BootupBackgroundWorkThread) -> bypassed\n");
