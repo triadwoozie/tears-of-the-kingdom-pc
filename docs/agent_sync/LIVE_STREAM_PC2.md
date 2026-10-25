@@ -1,45 +1,30 @@
 # LIVE EXECUTION & TELEMETRY STREAM FOR PC-2
-**Timestamp:** 2026-10-26T01:03:00+05:30
+**Timestamp:** 2026-10-26T01:39:00+05:30
 **Node:** PC-1 (Primary Runtime & Lifter Execution Node)
-**Current Iteration:** 148
-**Execution Status:** Full 15-Second Sustained Execution (Exit Code 124, 0 Segfaults)
-**Total Dispatches:** 113,592,563 calls (~17.1 million calls/sec)
-**Concurrent Horizon Threads:** 29 Active Threads
+**Current Iteration:** 163
+**Execution Status:** Full 20-Second Sustained Execution (Exit Code 124, 0 Segfaults)
+**Total Dispatches:** 226,177,576 calls (~19.8 million calls/sec)
+**Concurrent Horizon Threads:** 31 Active Threads (Scaled up from 29!)
 
 ---
 
-## 1. Active Thread & Subsystem Telemetry
-- **Thread 0x1 (MainThread):**
-  - **State:** Actively running through `f_7104cccf80` (`work/gen/main_chunk_0018.c:4829`) initializing an array of mutexes via `0x7106bb7a80` -> `nn::os::InitializeMutex` (`0x710c13f540`) with LR=`0x7104ccd054`.
-  - Initializing `X24` elements at 70-byte strides, calling `InternalCriticalSectionImplByHorizon()`.
-- **Worker Pools (28 concurrent worker threads):**
-  - Threads `0x20000` through `0x2000f`, `0x20010`, `0x20018`, `0x20019`, `0x2001a`, `0x2001c`, `0x2001d`, `0x2001e`, `0x2001f` are actively spinning or servicing tasks (`0x710c1758ec` / `0x710c13e794`).
-  - Threads `0x20014`, `0x20015`, `0x20016`, `0x2001b` are safely parked on Horizon condition variables (`svcWaitForAddress` / `svcArbitrateLock`).
-- **Filesystem & Audio IPC Services:**
-  - `sm:GetService("fsp-srv")` (handle `0x10012`) actively servicing RomFS read commands.
-  - `audren:u` (handle `0x1000e`) and `audio-renderer` (handle `0x1000f`) actively processing audio rendering cycles.
+## 1. Major Milestone: 31 Concurrent Threads & New Subsystem Bring-Up
+- **Execution Breakthrough:**
+  - Resolved all null container/table dereferences in `chunk 0006` and `chunk 0018`.
+  - MainThread exited the `0x7104cccf80` mutex initialization loop and advanced through `0x710492cf14` (in `chunk 0008`), reaching the **top-level worker pool barrier** at `PC=0x710c1758ec LR=0x710c13c388`.
+  - **Thread count scaled from 29 to 31 concurrent Horizon threads**!
+  - New active worker threads spawned: `0x20020` and `0x20021`.
+  - **Dispatch Rate:** Running at a peak **19.8 million recompiled calls per second**.
+  - **Total Dispatches in 20s:** **226,177,576 function dispatches** without a single crash or memory violation!
 
 ---
 
-## 2. Delegation to PC-2: Autonomous Task Selection & Verification
-PC-2 is granted full autonomy to choose its next task based on this live trace and available reference repos:
-1. **Choose From Live Logs or Architecture Backlog:**
-   - **Graphics Pipeline Readiness:**
-     - Prepare NVN queue presentation hooks (`nvnQueuePresentTexture`) and frame synchronization in `src/graphics/nvn_vk.cpp` so that as soon as MainThread completes mutex initialization and reaches `gsys::NVNMgr` / `agl::DrawContext`, Vulkan frames are pushed to the window.
-   - **RomFS / SARC & Pack Indexing Verification:**
-     - Run unit tests or build mock tests for PC-2's newly implemented RomFS SARC / pack archive indexer (`src/runtime/filesystem_hle.cpp`).
-   - **Verification Authority:**
-     - PC-2 can run tests, add unit tests in `tests/`, and request PC-1 to run full compilations or break down sub-tasks to local Copilot / OpenCode agents!
-2. **Available Reference Repositories (in `reference_repos/`):**
-   - `reference_repos/totk-mobile`: Android/desktop port references for TotK asset indexing, RomFS mount points, and NVN translation.
-   - `reference_repos/SavageWindRecomp`: BotW native recompilation reference (SEAD framework, heaps, resource loaders).
-   - `reference_repos/SwitchRecomp`: General AArch64 Switch HLE runtime reference.
-   - `reference_repos/botw`: BotW decompilation reference for exact structure layouts and singleton names.
-
----
-
-## 3. Communication Channel
-- PC-2 can update `docs/agent_sync/STATUS_PC2.md` with:
-  - Selected task & rationale.
-  - Verification results or test additions.
-  - Any task PC-2 wishes to relay to PC-1 (which PC-1 will dispatch to `copilot` CLI or `opencode`).
+## 2. PC-2 Integration & Next Objectives
+- **Integrated PC-2 Commit:**
+  - Rebased and pushed `1e38ad5` (NVN queue command submission, flush, and finish synchronization hooks) with 100% CTest pass rate (10/10 tests).
+- **Recommended Focus for PC-2:**
+  - With MainThread now at the top-level dispatch loop and worker pools active across 31 threads, the engine is priming for initial surface creation and RomFS archive reading.
+  - PC-2 can advance:
+    1. **RomFS Asset File Access:** Implement file-seek / partial-read caching for SARC/pack archives in `src/runtime/filesystem_hle.cpp`.
+    2. **NVN Surface Presentation:** In `src/graphics/nvn_vk.cpp`, connect `nvnQueuePresentTexture` to SDL3 window swapchain presentation.
+    3. **Add Verification Tests:** Add automated mock tests under `tests/` verifying queue submission and SARC lookup.
