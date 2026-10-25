@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <thread>
 #include <chrono>
+#include <mutex>
 
 namespace totk::hlr {
 
@@ -92,6 +93,60 @@ static void hlr_alloc_hook(totk::recompiler::Arm64Context *c) {
 
 void register_sead_hlr_hooks() {
     using totk::recompiler::Arm64Context;
+
+    // Avoid the original indirect calls, repairing missing sead singleton
+    // instances or vtables with no-op dummy objects when guest memory is ready.
+    totk::recompiler::register_recompiled_func(0x7104531f4cULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = totk::runtime::GUEST_MEMORY_BASE;
+        constexpr uint64_t guest_limit = totk::runtime::GUEST_MEMORY_LIMIT;
+        constexpr uint64_t dummy_method = 0x7104531f4cULL;
+        constexpr uint64_t singleton_slots[] = {
+            0x7107965000ULL + 0x358ULL,
+            0x710795e000ULL + 0xc38ULL,
+        };
+        static std::mutex singleton_mutex;
+        std::lock_guard<std::mutex> lock(singleton_mutex);
+
+        auto valid_guest_range = [](uint64_t address, uint64_t size) {
+            return address >= guest_base && address <= guest_limit &&
+                   size <= guest_limit - address;
+        };
+
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (memory.get_guest_base() != nullptr) {
+            for (uint64_t slot : singleton_slots) {
+                if (!valid_guest_range(slot, sizeof(uint64_t)) ||
+                    !memory.commit(slot, sizeof(uint64_t))) {
+                    continue;
+                }
+
+                uint64_t instance = *reinterpret_cast<const uint64_t *>(slot);
+                bool needs_dummy =
+                    instance == 0 || !valid_guest_range(instance, sizeof(uint64_t)) ||
+                    !memory.commit(instance, sizeof(uint64_t));
+                if (!needs_dummy) {
+                    const uint64_t vtable =
+                        *reinterpret_cast<const uint64_t *>(instance);
+                    needs_dummy =
+                        vtable == 0 || !valid_guest_range(vtable, sizeof(uint64_t)) ||
+                        !memory.commit(vtable, sizeof(uint64_t));
+                }
+
+                if (needs_dummy) {
+                    const uint64_t dummy_instance = hlr_bump_alloc(0x100, 0x10);
+                    const uint64_t dummy_vtable = hlr_bump_alloc(0x400, 0x20);
+                    for (uint64_t offset = 0; offset < 0x400; offset += sizeof(uint64_t)) {
+                        *reinterpret_cast<uint64_t *>(dummy_vtable + offset) = dummy_method;
+                    }
+                    *reinterpret_cast<uint64_t *>(dummy_instance) = dummy_vtable;
+                    *reinterpret_cast<uint64_t *>(slot) = dummy_instance;
+                }
+            }
+        }
+
+        c->x[0] = 0;
+        c->pc = c->x[30];
+    });
 
     static totk::recompiler::RecompiledFunc s_orig_710421e70c =
         totk::recompiler::lookup_recompiled_func(0x710421e70cULL);
