@@ -470,6 +470,36 @@ void register_sead_hlr_hooks() {
         return;
     });
 
+    totk::recompiler::register_recompiled_func(0x710c1f5f60ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    totk::recompiler::register_recompiled_func(0x710c1f69d0ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    totk::recompiler::register_recompiled_func(0x710c1f6a30ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    totk::recompiler::register_recompiled_func(0x710c1f6a90ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    totk::recompiler::register_recompiled_func(0x710c1f6ce0ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
     // Hook nn::oe::Initialize (0x710c407930)
     totk::recompiler::register_recompiled_func(0x710c407930ULL, [](Arm64Context *c) {
         c->x[0] = 0;
