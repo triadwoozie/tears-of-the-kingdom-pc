@@ -1400,6 +1400,22 @@ void register_sead_hlr_hooks() {
         c->pc = c->x[30];
     });
 
+    static totk::recompiler::RecompiledFunc s_orig_7104059b90 =
+        totk::recompiler::lookup_recompiled_func(0x7104059b90ULL);
+    totk::recompiler::register_recompiled_func(0x7104059b90ULL, [](Arm64Context *c) {
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (c->x[0] == 0 || !is_mapped_guest_range(memory, c->x[0], 0x48)) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+        if (s_orig_7104059b90) {
+            s_orig_7104059b90(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
     // Guard SEAD container setup functions against invalid container and heap pointers.
     static totk::recompiler::RecompiledFunc s_orig_7104708408 =
         totk::recompiler::lookup_recompiled_func(0x7104708408ULL);
