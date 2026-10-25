@@ -153,14 +153,18 @@ void register_sead_hlr_hooks() {
             return;
         }
 
-        if (c->x[2] == 0 && c->x[7] != 0 &&
-            (c->x[7] < guest_base || c->x[7] >= guest_limit)) {
-            c->x[7] = hlr_bump_alloc(0x200, 0x10);
+        uint64_t target = (c->x[2] != 0) ? c->x[2] : c->x[7];
+        if (target < guest_base || target >= guest_limit - 0x100) {
+            target = hlr_bump_alloc(0x200, 0x10);
+            if (c->x[2] != 0) c->x[2] = target;
+            else c->x[7] = target;
         }
-        if (c->x[2] != 0 &&
-            (c->x[2] < guest_base || c->x[2] >= guest_limit)) {
-            c->x[2] = hlr_bump_alloc(0x200, 0x10);
-        }
+
+        *reinterpret_cast<uint64_t *>(target + 104) = 0;
+        *reinterpret_cast<uint32_t *>(target + 104 + 0x14) = 0;
+        *reinterpret_cast<uint32_t *>(target + 0x78) = 0;
+        *reinterpret_cast<uint32_t *>(target + 0xa8) = 1;
+        *reinterpret_cast<uint32_t *>(target + 0x88) = 0;
 
         if (s_orig_71043d4a38) {
             s_orig_71043d4a38(c);
