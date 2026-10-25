@@ -1713,6 +1713,24 @@ void register_sead_hlr_hooks() {
         c->pc = c->x[30];
     });
 
+    static totk::recompiler::RecompiledFunc s_orig_7104d0c788 =
+        totk::recompiler::lookup_recompiled_func(0x7104d0c788ULL);
+    totk::recompiler::register_recompiled_func(0x7104d0c788ULL, [](Arm64Context *c) {
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL - 0x20) {
+            c->pc = c->x[30];
+            return;
+        }
+        if (c->x[1] < 0x7000000000ULL || c->x[1] >= 0x7300000000ULL - 0x20) {
+            c->x[1] = hlr_bump_alloc(0x100, 0x10);
+        }
+        if (c->x[0] == c->x[1]) {
+            c->pc = c->x[30];
+            return;
+        }
+        if (s_orig_7104d0c788) s_orig_7104d0c788(c);
+        else c->pc = c->x[30];
+    });
+
     // Guard nn::util::BinaryFileHeader::GetFirstBlock against invalid object pointers
     static totk::recompiler::RecompiledFunc s_orig_get_first_block =
         totk::recompiler::lookup_recompiled_func(0x7106bb7b00ULL);
