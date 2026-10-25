@@ -1367,6 +1367,33 @@ void register_sead_hlr_hooks() {
         c->pc = c->x[30];
     });
 
+    // Guard f_7104707ef0 against invalid object and heap pointers.
+    static totk::recompiler::RecompiledFunc s_orig_7104707ef0 =
+        totk::recompiler::lookup_recompiled_func(0x7104707ef0ULL);
+    totk::recompiler::register_recompiled_func(0x7104707ef0ULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = totk::runtime::GUEST_MEMORY_BASE;
+        constexpr uint64_t guest_limit = totk::runtime::GUEST_MEMORY_LIMIT;
+        auto &memory = totk::runtime::MemoryManager::instance();
+        auto valid_guest_range = [&memory](uint64_t address, uint64_t size) {
+            return memory.get_guest_base() != nullptr &&
+                   address >= guest_base && address <= guest_limit &&
+                   size <= guest_limit - address &&
+                   memory.commit(address, static_cast<size_t>(size));
+        };
+
+        if (c->x[0] == 0 || !valid_guest_range(c->x[0], 0x1c) ||
+            !valid_guest_range(c->x[2], sizeof(uint64_t))) {
+            c->pc = c->x[30];
+            return;
+        }
+
+        if (s_orig_7104707ef0) {
+            s_orig_7104707ef0(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
     // Guard f_7104707ff0 against invalid container and heap pointers.
     static totk::recompiler::RecompiledFunc s_orig_7104707ff0 =
         totk::recompiler::lookup_recompiled_func(0x7104707ff0ULL);
