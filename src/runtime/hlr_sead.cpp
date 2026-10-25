@@ -91,12 +91,17 @@ void register_sead_hlr_hooks() {
         }
 
         const uint64_t obj22 = *reinterpret_cast<const uint64_t *>(c->x[0] + 0xd8);
-        if (obj22 >= guest_base && obj22 < guest_limit - 0x190) {
-            uint64_t *p_sub8 = reinterpret_cast<uint64_t *>(obj22 + 0x188);
-            if (*p_sub8 < guest_base || *p_sub8 >= guest_limit) {
-                static uint64_t s_safe_sub8 = hlr_bump_alloc(0x1000, 0x10);
-                *p_sub8 = s_safe_sub8;
-            }
+        if (obj22 < guest_base || obj22 >= guest_limit - 0x190) {
+            c->x[0] = 0xffffffff;
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint64_t *p_sub8 = reinterpret_cast<uint64_t *>(obj22 + 0x188);
+        if (*p_sub8 < guest_base || *p_sub8 >= guest_limit) {
+            c->x[0] = 0xffffffff;
+            c->pc = c->x[30];
+            return;
         }
 
         if (s_orig_71043792d0) {
