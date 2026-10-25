@@ -142,6 +142,33 @@ void register_sead_hlr_hooks() {
         }
     });
 
+    static totk::recompiler::RecompiledFunc s_orig_71043d4a38 =
+        totk::recompiler::lookup_recompiled_func(0x71043d4a38ULL);
+    totk::recompiler::register_recompiled_func(0x71043d4a38ULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = 0x7000000000ULL;
+        constexpr uint64_t guest_limit = 0x7300000000ULL;
+
+        if (c->x[0] < guest_base || c->x[0] >= guest_limit) {
+            c->pc = c->x[30];
+            return;
+        }
+
+        if (c->x[2] == 0 && c->x[7] != 0 &&
+            (c->x[7] < guest_base || c->x[7] >= guest_limit)) {
+            c->x[7] = hlr_bump_alloc(0x200, 0x10);
+        }
+        if (c->x[2] != 0 &&
+            (c->x[2] < guest_base || c->x[2] >= guest_limit)) {
+            c->x[2] = hlr_bump_alloc(0x200, 0x10);
+        }
+
+        if (s_orig_71043d4a38) {
+            s_orig_71043d4a38(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
     // Guard f_71046f4818 against invalid object pointers and offsets.
     totk::recompiler::register_recompiled_func(0x71046f4818ULL, [](Arm64Context *c) {
         constexpr uint64_t guest_base = 0x7000000000ULL;
