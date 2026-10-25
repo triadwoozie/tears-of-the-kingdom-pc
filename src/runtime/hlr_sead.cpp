@@ -1635,18 +1635,10 @@ void register_sead_hlr_hooks() {
         }
     });
 
-    // Guard f_7104cceae8 against a missing container and its null lookup result.
-    static totk::recompiler::RecompiledFunc s_orig_7104cceae8 =
-        totk::recompiler::lookup_recompiled_func(0x7104cceae8ULL);
+    // Bypass f_7104cceae8 to avoid dereferencing a null lookup result.
     totk::recompiler::register_recompiled_func(0x7104cceae8ULL, [](Arm64Context *c) {
-        auto &memory = totk::runtime::MemoryManager::instance();
-        if (!is_mapped_guest_range(memory, c->x[0], sizeof(uint64_t)) ||
-            !s_orig_7104cceae8) {
-            c->pc = c->x[30];
-            return;
-        }
-
-        s_orig_7104cceae8(c);
+        c->x[0] = 0;
+        c->pc = c->x[30];
     });
 
     static totk::recompiler::RecompiledFunc s_orig_71047083a0 =
