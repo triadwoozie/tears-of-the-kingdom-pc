@@ -241,6 +241,48 @@ void test_dynamic_render_targets_and_hdr_blit() {
     std::printf("  -> Dynamic Render Target Allocation & HDR Blit: PASSED\n");
 }
 
+void test_queue_submission_and_synchronization() {
+    std::printf("[Test] Running test_queue_submission_and_synchronization...\n");
+    totk::graphics::VulkanBackend backend;
+    bool init_ok = backend.initialize_mock();
+    assert(init_ok);
+
+    backend.begin_command_recording();
+    backend.cmd_draw(3, 1, 0, 0);
+
+    // 1. Direct queue operations
+    backend.queue_submit_commands(2, nullptr);
+    assert(backend.get_recording_state().recorded_submits == 2);
+
+    backend.queue_flush();
+    assert(backend.get_recording_state().recorded_flushes == 1);
+
+    backend.queue_finish();
+    assert(backend.get_recording_state().recorded_finishes == 1);
+
+    // 2. HLE dispatch through nvn_get_proc_address
+    using SubmitFn = void (*)(uint64_t, int, const void *);
+    auto submit_fn = reinterpret_cast<SubmitFn>(totk::graphics::nvn_get_proc_address("nvnQueueSubmitCommands"));
+    assert(submit_fn != nullptr);
+    submit_fn(0, 1, nullptr);
+    assert(backend.get_recording_state().recorded_submits == 3);
+
+    using FinishFn = uint64_t (*)(uint64_t);
+    auto finish_fn = reinterpret_cast<FinishFn>(totk::graphics::nvn_get_proc_address("nvnQueueFinish"));
+    assert(finish_fn != nullptr);
+    finish_fn(0);
+    assert(backend.get_recording_state().recorded_finishes == 2);
+
+    using FlushFn = uint64_t (*)(uint64_t);
+    auto flush_fn = reinterpret_cast<FlushFn>(totk::graphics::nvn_get_proc_address("nvnQueueFlush"));
+    assert(flush_fn != nullptr);
+    flush_fn(0);
+    assert(backend.get_recording_state().recorded_flushes == 2);
+
+    backend.shutdown();
+    std::printf("  -> NVN Queue Submission & Synchronization: PASSED\n");
+}
+
 int main() {
     std::printf("==================================================\n");
     std::printf("  NVN-to-Vulkan 1.3 Subsystems Unit Tests\n");
@@ -252,6 +294,7 @@ int main() {
     test_pipeline_cache_progress();
     test_vulkan_command_recording_and_presentation();
     test_dynamic_render_targets_and_hdr_blit();
+    test_queue_submission_and_synchronization();
 
     std::printf("\nAll NVN-to-Vulkan unit tests PASSED successfully!\n");
     return 0;

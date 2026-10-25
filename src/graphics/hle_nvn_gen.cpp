@@ -1845,12 +1845,18 @@ static uint64_t hle_nvnQueueFinalize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t 
 static uint64_t hle_nvnQueueFinish(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
     (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->queue_finish();
+    }
     return 0;
 }
 
 static uint64_t hle_nvnQueueFlush(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
     (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->queue_flush();
+    }
     return 0;
 }
 
@@ -1912,7 +1918,10 @@ static uint64_t hle_nvnQueueSetDebugLabel(uint64_t x0 = 0, uint64_t x1 = 0, uint
 }
 
 static void hle_nvnQueueSubmitCommands(uint64_t q, int num_cmds, const void *handles) {
-    (void)q; (void)num_cmds; (void)handles;
+    (void)q;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->queue_submit_commands(num_cmds, handles);
+    }
 }
 
 static uint64_t hle_nvnQueueWaitSync(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,

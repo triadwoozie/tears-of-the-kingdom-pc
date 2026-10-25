@@ -73,6 +73,9 @@ struct CommandRecordingState {
     VkFramebuffer active_framebuffer = VK_NULL_HANDLE;
     uint64_t recorded_blits = 0;
     bool last_blit_was_hdr = false;
+    uint64_t recorded_submits = 0;
+    uint64_t recorded_finishes = 0;
+    uint64_t recorded_flushes = 0;
 };
 
 class VulkanBackend {
@@ -112,6 +115,11 @@ public:
     void cmd_set_render_targets_simple(uint32_t num_colors, const uint64_t *color_target_handles, uint64_t depth_target_handle = 0);
     void set_offscreen_hdr_target(VkImage image, VkFormat format, uint32_t width, uint32_t height);
     bool blit_hdr_to_swapchain(VkImage src_image, VkFormat src_format, uint32_t src_width, uint32_t src_height);
+
+    // NVN Queue Operations & Frame Synchronization
+    void queue_submit_commands(int num_cmds, const void *handles);
+    void queue_finish();
+    void queue_flush();
 
     bool present_texture(uint64_t queue, uint64_t window, int texture_index);
 

@@ -840,6 +840,28 @@ VkFramebuffer VulkanBackend::get_or_create_framebuffer(uint32_t width, uint32_t 
     return fb;
 }
 
+void VulkanBackend::queue_submit_commands(int num_cmds, const void *handles) {
+    rec_state_.recorded_submits += (num_cmds > 0 ? num_cmds : 1);
+    (void)handles;
+    if (is_mock_ || !initialized_ || command_buffers_.empty()) {
+        return;
+    }
+    if (rec_state_.is_recording) {
+        end_command_recording();
+    }
+}
+
+void VulkanBackend::queue_finish() {
+    rec_state_.recorded_finishes++;
+    if (!is_mock_ && initialized_ && device_ != VK_NULL_HANDLE) {
+        vkQueueWaitIdle(queue_);
+    }
+}
+
+void VulkanBackend::queue_flush() {
+    rec_state_.recorded_flushes++;
+}
+
 bool VulkanBackend::present_texture(uint64_t queue, uint64_t window, int texture_index) {
     (void)queue;
     (void)window;
