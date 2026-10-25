@@ -78,6 +78,22 @@ static void hlr_alloc_hook(totk::recompiler::Arm64Context *c) {
 void register_sead_hlr_hooks() {
     using totk::recompiler::Arm64Context;
 
+    static totk::recompiler::RecompiledFunc s_orig_710472fbd0 =
+        totk::recompiler::lookup_recompiled_func(0x710472fbd0ULL);
+    totk::recompiler::register_recompiled_func(0x710472fbd0ULL, [](Arm64Context *c) {
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
+            c->x[0] = hlr_bump_alloc(0x1000, 0x10);
+            if (c->x[2] >= 0x7000000000ULL && c->x[2] < 0x7300000000ULL) {
+                *reinterpret_cast<uint64_t *>(c->x[2] + 0x68) = c->x[0];
+            }
+        }
+        if (c->x[2] < 0x7000000000ULL || c->x[2] >= 0x7300000000ULL) {
+            c->x[2] = hlr_bump_alloc(0x200, 0x10);
+        }
+        if (s_orig_710472fbd0) s_orig_710472fbd0(c);
+        else c->pc = c->x[30];
+    });
+
     static totk::recompiler::RecompiledFunc s_orig_71068ff3f0 =
         totk::recompiler::lookup_recompiled_func(0x71068ff3f0ULL);
     totk::recompiler::register_recompiled_func(0x71068ff3f0ULL, [](Arm64Context *c) {
