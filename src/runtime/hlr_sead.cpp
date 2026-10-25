@@ -1621,6 +1621,9 @@ void register_sead_hlr_hooks() {
         if (c->x[0] == 0 || memory.get_guest_base() == nullptr ||
             !memory.is_in_guest_range(c->x[0]) ||
             !memory.commit(c->x[0], sizeof(uint64_t))) {
+            if (c->x[22] == 0) {
+                c->x[22] = get_safe_container_node();
+            }
             c->pc = c->x[30];
             return;
         }
@@ -1630,6 +1633,20 @@ void register_sead_hlr_hooks() {
         } else {
             c->pc = c->x[30];
         }
+    });
+
+    // Guard f_7104cceae8 against a missing container and its null lookup result.
+    static totk::recompiler::RecompiledFunc s_orig_7104cceae8 =
+        totk::recompiler::lookup_recompiled_func(0x7104cceae8ULL);
+    totk::recompiler::register_recompiled_func(0x7104cceae8ULL, [](Arm64Context *c) {
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (!is_mapped_guest_range(memory, c->x[0], sizeof(uint64_t)) ||
+            !s_orig_7104cceae8) {
+            c->pc = c->x[30];
+            return;
+        }
+
+        s_orig_7104cceae8(c);
     });
 
     static totk::recompiler::RecompiledFunc s_orig_71047083a0 =
