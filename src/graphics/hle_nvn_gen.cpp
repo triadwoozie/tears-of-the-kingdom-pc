@@ -1010,7 +1010,14 @@ static uint64_t hle_nvnCommandBufferSetRenderEnableConditional(uint64_t x0 = 0, 
 
 static uint64_t hle_nvnCommandBufferSetRenderTargets(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x0; (void)x3; (void)x5; (void)x6; (void)x7;
+    auto *backend = VulkanBackend::get_active();
+    if (backend) {
+        uint32_t num_colors = static_cast<uint32_t>(x1);
+        const uint64_t *color_targets = reinterpret_cast<const uint64_t *>(x2);
+        uint64_t depth_target = x4;
+        backend->cmd_set_render_targets_simple(num_colors, color_targets, depth_target);
+    }
     return 0;
 }
 

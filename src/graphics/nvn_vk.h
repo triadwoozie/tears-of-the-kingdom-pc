@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // Volk must precede Vulkan
@@ -33,6 +34,16 @@ struct FrameStats {
     uint32_t active_shaders = 0;
 };
 
+struct RenderTargetAttachment {
+    uint64_t texture_handle = 0;
+    VkImageView image_view = VK_NULL_HANDLE;
+    VkImage image = VK_NULL_HANDLE;
+    VkFormat format = VK_FORMAT_UNDEFINED;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    bool is_depth = false;
+};
+
 struct CommandRecordingState {
     bool is_recording = false;
     float active_viewport_x = 0.0f;
@@ -50,6 +61,18 @@ struct CommandRecordingState {
     uint32_t last_uniform_slot = 0;
     uint32_t last_uniform_offset = 0;
     size_t last_uniform_size = 0;
+
+    // Dynamic Render Targets
+    uint64_t recorded_rt_binds = 0;
+    uint32_t last_rt_color_count = 0;
+    bool last_rt_has_depth = false;
+    uint32_t active_rt_width = 0;
+    uint32_t active_rt_height = 0;
+    VkFormat last_rt_color_formats[8]{};
+    VkFormat last_rt_depth_format = VK_FORMAT_UNDEFINED;
+    VkFramebuffer active_framebuffer = VK_NULL_HANDLE;
+    uint64_t recorded_blits = 0;
+    bool last_blit_was_hdr = false;
 };
 
 class VulkanBackend {
@@ -84,6 +107,12 @@ public:
     void cmd_bind_uniform_buffer(uint32_t stage, uint32_t slot, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize range);
     void cmd_update_uniform_buffer(uint32_t stage, uint32_t slot, const void *data, size_t size);
 
+    // Dynamic Render Target Allocation & Blit
+    void cmd_set_render_targets(uint32_t num_colors, const RenderTargetAttachment *color_targets, const RenderTargetAttachment *depth_target = nullptr);
+    void cmd_set_render_targets_simple(uint32_t num_colors, const uint64_t *color_target_handles, uint64_t depth_target_handle = 0);
+    void set_offscreen_hdr_target(VkImage image, VkFormat format, uint32_t width, uint32_t height);
+    bool blit_hdr_to_swapchain(VkImage src_image, VkFormat src_format, uint32_t src_width, uint32_t src_height);
+
     bool present_texture(uint64_t queue, uint64_t window, int texture_index);
 
     const CommandRecordingState &get_recording_state() const { return rec_state_; }
@@ -113,6 +142,43 @@ private:
     bool create_framebuffers();
     bool create_command_pool();
     bool create_sync_objects();
+
+    struct FramebufferKey {
+        uint32_t width = 0;
+        uint32_t height = 0;
+        uint32_t num_colors = 0;
+        VkImageView views[9]{}; // up to 8 colors + 1 depth
+        bool operator==(const FramebufferKey &other) const {
+            if (width != other.width || height != other.height || num_colors != other.num_colors) return false;
+            for (size_t i = 0; i <= num_colors; ++i) {
+                if (views[i] != other.views[i]) return false;
+            }
+            return true;
+        }
+    };
+    struct FramebufferKeyHash {
+        size_t operator()(const FramebufferKey &k) const {
+            size_t h = (static_cast<size_t>(k.width) << 32) ^ k.height ^ k.num_colors;
+            for (size_t i = 0; i <= k.num_colors && i < 9; ++i) {
+                h ^= reinterpret_cast<uintptr_t>(k.views[i]) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            }
+            return h;
+        }
+    };
+
+    VkFramebuffer get_or_create_framebuffer(uint32_t width, uint32_t height, uint32_t num_colors,
+                                            const VkImageView *color_views, const VkFormat *color_formats,
+                                            VkImageView depth_view = VK_NULL_HANDLE, VkFormat depth_format = VK_FORMAT_UNDEFINED);
+    VkRenderPass get_or_create_render_pass(uint32_t num_colors, const VkFormat *color_formats, VkFormat depth_format);
+
+    std::unordered_map<FramebufferKey, VkFramebuffer, FramebufferKeyHash> dynamic_framebuffers_;
+    std::unordered_map<uint64_t, VkRenderPass> dynamic_render_passes_;
+
+    // Offscreen HDR render target tracking for swapchain blit
+    VkImage offscreen_hdr_image_ = VK_NULL_HANDLE;
+    VkFormat offscreen_hdr_format_ = VK_FORMAT_UNDEFINED;
+    uint32_t offscreen_hdr_width_ = 0;
+    uint32_t offscreen_hdr_height_ = 0;
 
     SDL_Window *window_ = nullptr;
     GraphicsConfig config_;

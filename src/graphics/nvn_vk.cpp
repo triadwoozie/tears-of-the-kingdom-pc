@@ -83,7 +83,17 @@ void VulkanBackend::shutdown() {
     for (auto fb : swapchain_framebuffers_) vkDestroyFramebuffer(device_, fb, nullptr);
     swapchain_framebuffers_.clear();
 
+    for (auto &[_, fb] : dynamic_framebuffers_) {
+        if (fb != VK_NULL_HANDLE) vkDestroyFramebuffer(device_, fb, nullptr);
+    }
+    dynamic_framebuffers_.clear();
+
     if (render_pass_) vkDestroyRenderPass(device_, render_pass_, nullptr);
+
+    for (auto &[_, rp] : dynamic_render_passes_) {
+        if (rp != VK_NULL_HANDLE) vkDestroyRenderPass(device_, rp, nullptr);
+    }
+    dynamic_render_passes_.clear();
 
     for (auto view : swapchain_views_) vkDestroyImageView(device_, view, nullptr);
     swapchain_views_.clear();
@@ -547,10 +557,297 @@ void VulkanBackend::cmd_update_uniform_buffer(uint32_t stage, uint32_t slot, con
     (void)data;
 }
 
+void VulkanBackend::cmd_set_render_targets(uint32_t num_colors, const RenderTargetAttachment *color_targets, const RenderTargetAttachment *depth_target) {
+    rec_state_.recorded_rt_binds++;
+    rec_state_.last_rt_color_count = num_colors;
+    rec_state_.last_rt_has_depth = (depth_target != nullptr);
+    if (color_targets && num_colors > 0) {
+        rec_state_.active_rt_width = color_targets[0].width;
+        rec_state_.active_rt_height = color_targets[0].height;
+        for (uint32_t i = 0; i < num_colors && i < 8; ++i) {
+            rec_state_.last_rt_color_formats[i] = color_targets[i].format;
+        }
+    }
+    if (depth_target) {
+        rec_state_.last_rt_depth_format = depth_target->format;
+        if (rec_state_.active_rt_width == 0) {
+            rec_state_.active_rt_width = depth_target->width;
+            rec_state_.active_rt_height = depth_target->height;
+        }
+    } else {
+        rec_state_.last_rt_depth_format = VK_FORMAT_UNDEFINED;
+    }
+
+    if (is_mock_ || !initialized_ || !rec_state_.is_recording || command_buffers_.empty()) {
+        return;
+    }
+
+    VkImageView color_views[8]{};
+    VkFormat color_formats[8]{};
+    for (uint32_t i = 0; i < num_colors && i < 8; ++i) {
+        color_views[i] = color_targets[i].image_view;
+        color_formats[i] = color_targets[i].format;
+    }
+    VkImageView depth_view = depth_target ? depth_target->image_view : VK_NULL_HANDLE;
+    VkFormat depth_format = depth_target ? depth_target->format : VK_FORMAT_UNDEFINED;
+
+    VkFramebuffer fb = get_or_create_framebuffer(
+        rec_state_.active_rt_width, rec_state_.active_rt_height,
+        num_colors, color_views, color_formats, depth_view, depth_format);
+    rec_state_.active_framebuffer = fb;
+}
+
+void VulkanBackend::cmd_set_render_targets_simple(uint32_t num_colors, const uint64_t *color_target_handles, uint64_t depth_target_handle) {
+    rec_state_.recorded_rt_binds++;
+    rec_state_.last_rt_color_count = num_colors;
+    rec_state_.last_rt_has_depth = (depth_target_handle != 0);
+    if (rec_state_.active_rt_width == 0) {
+        rec_state_.active_rt_width = 1920;
+        rec_state_.active_rt_height = 1080;
+    }
+    for (uint32_t i = 0; i < num_colors && i < 8; ++i) {
+        rec_state_.last_rt_color_formats[i] = VK_FORMAT_R8G8B8A8_UNORM;
+    }
+    if (depth_target_handle != 0) {
+        rec_state_.last_rt_depth_format = VK_FORMAT_D32_SFLOAT;
+    }
+    (void)color_target_handles;
+}
+
+void VulkanBackend::set_offscreen_hdr_target(VkImage image, VkFormat format, uint32_t width, uint32_t height) {
+    offscreen_hdr_image_ = image;
+    offscreen_hdr_format_ = format;
+    offscreen_hdr_width_ = width;
+    offscreen_hdr_height_ = height;
+}
+
+bool VulkanBackend::blit_hdr_to_swapchain(VkImage src_image, VkFormat src_format, uint32_t src_width, uint32_t src_height) {
+    rec_state_.recorded_blits++;
+    bool is_hdr = (src_format == VK_FORMAT_R16G16B16A16_SFLOAT ||
+                   src_format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 ||
+                   src_format == VK_FORMAT_B10G11R11_UFLOAT_PACK32 ||
+                   src_format == VK_FORMAT_R32G32B32A32_SFLOAT);
+    rec_state_.last_blit_was_hdr = is_hdr;
+
+    if (is_mock_ || !initialized_ || command_buffers_.empty()) {
+        return true;
+    }
+
+    VkCommandBuffer cmd = command_buffers_[current_frame_];
+    VkImage dst_image = (current_image_index_ < swapchain_images_.size()) ? swapchain_images_[current_image_index_] : VK_NULL_HANDLE;
+    if (src_image == VK_NULL_HANDLE || dst_image == VK_NULL_HANDLE) {
+        return false;
+    }
+
+    // Transition src to TRANSFER_SRC_OPTIMAL
+    VkImageMemoryBarrier src_barrier{};
+    src_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    src_barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    src_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    src_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    src_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    src_barrier.image = src_image;
+    src_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    src_barrier.subresourceRange.baseMipLevel = 0;
+    src_barrier.subresourceRange.levelCount = 1;
+    src_barrier.subresourceRange.baseArrayLayer = 0;
+    src_barrier.subresourceRange.layerCount = 1;
+    src_barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    src_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+    // Transition dst to TRANSFER_DST_OPTIMAL
+    VkImageMemoryBarrier dst_barrier{};
+    dst_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    dst_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    dst_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    dst_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    dst_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    dst_barrier.image = dst_image;
+    dst_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    dst_barrier.subresourceRange.baseMipLevel = 0;
+    dst_barrier.subresourceRange.levelCount = 1;
+    dst_barrier.subresourceRange.baseArrayLayer = 0;
+    dst_barrier.subresourceRange.layerCount = 1;
+    dst_barrier.srcAccessMask = 0;
+    dst_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    VkImageMemoryBarrier barriers[2] = {src_barrier, dst_barrier};
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, nullptr, 0, nullptr, 2, barriers);
+
+    // Blit region
+    VkImageBlit blit_region{};
+    blit_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    blit_region.srcSubresource.mipLevel = 0;
+    blit_region.srcSubresource.baseArrayLayer = 0;
+    blit_region.srcSubresource.layerCount = 1;
+    blit_region.srcOffsets[0] = {0, 0, 0};
+    blit_region.srcOffsets[1] = {static_cast<int32_t>(src_width), static_cast<int32_t>(src_height), 1};
+
+    blit_region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    blit_region.dstSubresource.mipLevel = 0;
+    blit_region.dstSubresource.baseArrayLayer = 0;
+    blit_region.dstSubresource.layerCount = 1;
+    blit_region.dstOffsets[0] = {0, 0, 0};
+    blit_region.dstOffsets[1] = {static_cast<int32_t>(swapchain_extent_.width), static_cast<int32_t>(swapchain_extent_.height), 1};
+
+    vkCmdBlitImage(cmd,
+                   src_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   dst_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                   1, &blit_region, VK_FILTER_LINEAR);
+
+    // Transition dst to PRESENT_SRC_KHR
+    dst_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    dst_barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    dst_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    dst_barrier.dstAccessMask = 0;
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &dst_barrier);
+
+    return true;
+}
+
+VkRenderPass VulkanBackend::get_or_create_render_pass(uint32_t num_colors, const VkFormat *color_formats, VkFormat depth_format) {
+    if (device_ == VK_NULL_HANDLE) return VK_NULL_HANDLE;
+
+    uint64_t hash = num_colors;
+    for (uint32_t i = 0; i < num_colors; ++i) {
+        hash = hash * 31 + static_cast<uint64_t>(color_formats[i]);
+    }
+    hash = hash * 31 + static_cast<uint64_t>(depth_format);
+
+    auto it = dynamic_render_passes_.find(hash);
+    if (it != dynamic_render_passes_.end()) {
+        return it->second;
+    }
+
+    std::vector<VkAttachmentDescription> attachments;
+    std::vector<VkAttachmentReference> color_refs;
+
+    for (uint32_t i = 0; i < num_colors; ++i) {
+        VkAttachmentDescription desc{};
+        desc.format = color_formats[i];
+        desc.samples = VK_SAMPLE_COUNT_1_BIT;
+        desc.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        desc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        desc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        desc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        desc.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        desc.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        attachments.push_back(desc);
+
+        VkAttachmentReference ref{};
+        ref.attachment = i;
+        ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        color_refs.push_back(ref);
+    }
+
+    VkAttachmentReference depth_ref{};
+    if (depth_format != VK_FORMAT_UNDEFINED) {
+        VkAttachmentDescription desc{};
+        desc.format = depth_format;
+        desc.samples = VK_SAMPLE_COUNT_1_BIT;
+        desc.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        desc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        desc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        desc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
+        desc.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        desc.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        attachments.push_back(desc);
+
+        depth_ref.attachment = static_cast<uint32_t>(attachments.size() - 1);
+        depth_ref.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    }
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = static_cast<uint32_t>(color_refs.size());
+    subpass.pColorAttachments = color_refs.empty() ? nullptr : color_refs.data();
+    subpass.pDepthStencilAttachment = (depth_format != VK_FORMAT_UNDEFINED) ? &depth_ref : nullptr;
+
+    VkSubpassDependency dependency{};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.srcAccessMask = 0;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+    VkRenderPassCreateInfo rp_info{};
+    rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    rp_info.attachmentCount = static_cast<uint32_t>(attachments.size());
+    rp_info.pAttachments = attachments.empty() ? nullptr : attachments.data();
+    rp_info.subpassCount = 1;
+    rp_info.pSubpasses = &subpass;
+    rp_info.dependencyCount = 1;
+    rp_info.pDependencies = &dependency;
+
+    VkRenderPass rp = VK_NULL_HANDLE;
+    if (vkCreateRenderPass(device_, &rp_info, nullptr, &rp) == VK_SUCCESS) {
+        dynamic_render_passes_[hash] = rp;
+    }
+    return rp;
+}
+
+VkFramebuffer VulkanBackend::get_or_create_framebuffer(uint32_t width, uint32_t height, uint32_t num_colors,
+                                                       const VkImageView *color_views, const VkFormat *color_formats,
+                                                       VkImageView depth_view, VkFormat depth_format) {
+    if (device_ == VK_NULL_HANDLE) return VK_NULL_HANDLE;
+
+    FramebufferKey key;
+    key.width = width;
+    key.height = height;
+    key.num_colors = num_colors;
+    for (uint32_t i = 0; i < num_colors && i < 8; ++i) {
+        key.views[i] = color_views ? color_views[i] : VK_NULL_HANDLE;
+    }
+    key.views[num_colors] = depth_view;
+
+    auto it = dynamic_framebuffers_.find(key);
+    if (it != dynamic_framebuffers_.end()) {
+        return it->second;
+    }
+
+    VkRenderPass rp = get_or_create_render_pass(num_colors, color_formats, depth_format);
+    if (rp == VK_NULL_HANDLE) return VK_NULL_HANDLE;
+
+    std::vector<VkImageView> attachments;
+    for (uint32_t i = 0; i < num_colors && i < 8; ++i) {
+        attachments.push_back(color_views[i]);
+    }
+    if (depth_view != VK_NULL_HANDLE) {
+        attachments.push_back(depth_view);
+    }
+
+    VkFramebufferCreateInfo fb_info{};
+    fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    fb_info.renderPass = rp;
+    fb_info.attachmentCount = static_cast<uint32_t>(attachments.size());
+    fb_info.pAttachments = attachments.data();
+    fb_info.width = width;
+    fb_info.height = height;
+    fb_info.layers = 1;
+
+    VkFramebuffer fb = VK_NULL_HANDLE;
+    if (vkCreateFramebuffer(device_, &fb_info, nullptr, &fb) == VK_SUCCESS) {
+        dynamic_framebuffers_[key] = fb;
+    }
+    return fb;
+}
+
 bool VulkanBackend::present_texture(uint64_t queue, uint64_t window, int texture_index) {
     (void)queue;
     (void)window;
     (void)texture_index;
+
+    if (offscreen_hdr_image_ != VK_NULL_HANDLE || offscreen_hdr_format_ != VK_FORMAT_UNDEFINED) {
+        blit_hdr_to_swapchain(offscreen_hdr_image_, offscreen_hdr_format_, offscreen_hdr_width_, offscreen_hdr_height_);
+    }
 
     if (is_mock_) {
         rec_state_.is_recording = false;

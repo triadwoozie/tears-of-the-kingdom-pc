@@ -181,6 +181,66 @@ void test_vulkan_command_recording_and_presentation() {
     std::printf("  -> Vulkan 1.3 Command Recording & Presentation: PASSED\n");
 }
 
+void test_dynamic_render_targets_and_hdr_blit() {
+    std::printf("[Test] Running test_dynamic_render_targets_and_hdr_blit...\n");
+    totk::graphics::VulkanBackend backend;
+    bool init_ok = backend.initialize_mock();
+    assert(init_ok);
+
+    backend.begin_command_recording();
+
+    // 1. Configure multiple render targets (MRT) with HDR formats and depth
+    totk::graphics::RenderTargetAttachment colors[2]{};
+    colors[0].width = 1920;
+    colors[0].height = 1080;
+    colors[0].format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    colors[0].is_depth = false;
+
+    colors[1].width = 1920;
+    colors[1].height = 1080;
+    colors[1].format = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+    colors[1].is_depth = false;
+
+    totk::graphics::RenderTargetAttachment depth{};
+    depth.width = 1920;
+    depth.height = 1080;
+    depth.format = VK_FORMAT_D32_SFLOAT;
+    depth.is_depth = true;
+
+    backend.cmd_set_render_targets(2, colors, &depth);
+    assert(backend.get_recording_state().recorded_rt_binds == 1);
+    assert(backend.get_recording_state().last_rt_color_count == 2);
+    assert(backend.get_recording_state().last_rt_has_depth == true);
+    assert(backend.get_recording_state().active_rt_width == 1920);
+    assert(backend.get_recording_state().active_rt_height == 1080);
+    assert(backend.get_recording_state().last_rt_color_formats[0] == VK_FORMAT_R16G16B16A16_SFLOAT);
+    assert(backend.get_recording_state().last_rt_color_formats[1] == VK_FORMAT_A2B10G10R10_UNORM_PACK32);
+    assert(backend.get_recording_state().last_rt_depth_format == VK_FORMAT_D32_SFLOAT);
+
+    // 2. Test offscreen HDR target blit and swapchain present
+    backend.set_offscreen_hdr_target(reinterpret_cast<VkImage>(0x1234), VK_FORMAT_R16G16B16A16_SFLOAT, 1920, 1080);
+    bool present_ok = backend.present_texture(0, 0, 0);
+    assert(present_ok);
+    assert(backend.get_recording_state().recorded_blits == 1);
+    assert(backend.get_recording_state().last_blit_was_hdr == true);
+
+    // 3. Test through HLE function pointer nvnCommandBufferSetRenderTargets
+    using SetRTFn = void (*)(uint64_t, int, const uint64_t *, uint64_t, uint64_t, uint64_t);
+    auto set_rt_fn = reinterpret_cast<SetRTFn>(totk::graphics::nvn_get_proc_address("nvnCommandBufferSetRenderTargets"));
+    assert(set_rt_fn != nullptr);
+
+    uint64_t fake_targets[4] = {0x1000, 0x2000, 0x3000, 0x4000};
+    set_rt_fn(0, 4, fake_targets, 0, 0x5000, 0);
+    assert(backend.get_recording_state().recorded_rt_binds == 2);
+    assert(backend.get_recording_state().last_rt_color_count == 4);
+    assert(backend.get_recording_state().last_rt_has_depth == true);
+    assert(backend.get_recording_state().last_rt_color_formats[0] == VK_FORMAT_R8G8B8A8_UNORM);
+    assert(backend.get_recording_state().last_rt_depth_format == VK_FORMAT_D32_SFLOAT);
+
+    backend.shutdown();
+    std::printf("  -> Dynamic Render Target Allocation & HDR Blit: PASSED\n");
+}
+
 int main() {
     std::printf("==================================================\n");
     std::printf("  NVN-to-Vulkan 1.3 Subsystems Unit Tests\n");
@@ -191,6 +251,7 @@ int main() {
     test_conditional_rendering();
     test_pipeline_cache_progress();
     test_vulkan_command_recording_and_presentation();
+    test_dynamic_render_targets_and_hdr_blit();
 
     std::printf("\nAll NVN-to-Vulkan unit tests PASSED successfully!\n");
     return 0;
