@@ -45,12 +45,30 @@ bool VulkanBackend::initialize(SDL_Window *window, const GraphicsConfig &config)
     if (!create_sync_objects()) return false;
 
     initialized_ = true;
+    s_active_backend = this;
     std::printf("[Vulkan] Initialized Vulkan 1.3 backend successfully.\n");
     return true;
 }
 
+bool VulkanBackend::initialize_mock() {
+    is_mock_ = true;
+    initialized_ = true;
+    s_active_backend = this;
+    rec_state_ = {};
+    stats_ = {};
+    return true;
+}
+
 void VulkanBackend::shutdown() {
+    if (s_active_backend == this) {
+        s_active_backend = nullptr;
+    }
     if (!initialized_) return;
+    if (is_mock_) {
+        initialized_ = false;
+        is_mock_ = false;
+        return;
+    }
 
     vkDeviceWaitIdle(device_);
 
@@ -416,6 +434,161 @@ void VulkanBackend::resize(int width, int height) {
     create_swapchain();
     create_framebuffers();
     (void)width; (void)height;
+}
+
+bool VulkanBackend::begin_command_recording() {
+    rec_state_.is_recording = true;
+    if (!is_mock_ && initialized_ && !command_buffers_.empty()) {
+        VkCommandBuffer cmd = command_buffers_[current_frame_];
+        vkResetCommandBuffer(cmd, 0);
+        VkCommandBufferBeginInfo begin_info{};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(cmd, &begin_info);
+    }
+    return true;
+}
+
+void VulkanBackend::end_command_recording() {
+    if (!is_mock_ && initialized_ && rec_state_.is_recording && !command_buffers_.empty()) {
+        VkCommandBuffer cmd = command_buffers_[current_frame_];
+        vkEndCommandBuffer(cmd);
+    }
+    rec_state_.is_recording = false;
+}
+
+void VulkanBackend::cmd_bind_pipeline(VkPipeline pipeline, VkPipelineBindPoint bind_point) {
+    rec_state_.bound_pipeline = pipeline;
+    stats_.pipeline_binds++;
+    if (!is_mock_ && initialized_ && rec_state_.is_recording && !command_buffers_.empty()) {
+        VkCommandBuffer cmd = command_buffers_[current_frame_];
+        vkCmdBindPipeline(cmd, bind_point, pipeline);
+    }
+}
+
+void VulkanBackend::cmd_bind_vertex_buffers(uint32_t first_binding, uint32_t binding_count, const VkBuffer *buffers, const VkDeviceSize *offsets) {
+    rec_state_.recorded_vertex_binds += binding_count;
+    if (!is_mock_ && initialized_ && rec_state_.is_recording && !command_buffers_.empty()) {
+        VkCommandBuffer cmd = command_buffers_[current_frame_];
+        vkCmdBindVertexBuffers(cmd, first_binding, binding_count, buffers, offsets);
+    }
+}
+
+void VulkanBackend::cmd_bind_index_buffer(VkBuffer buffer, VkDeviceSize offset, VkIndexType index_type) {
+    if (!is_mock_ && initialized_ && rec_state_.is_recording && !command_buffers_.empty()) {
+        VkCommandBuffer cmd = command_buffers_[current_frame_];
+        vkCmdBindIndexBuffer(cmd, buffer, offset, index_type);
+    }
+}
+
+void VulkanBackend::cmd_draw(uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance) {
+    rec_state_.recorded_draws++;
+    stats_.draw_calls++;
+    if (!is_mock_ && initialized_ && rec_state_.is_recording && !command_buffers_.empty()) {
+        VkCommandBuffer cmd = command_buffers_[current_frame_];
+        vkCmdDraw(cmd, vertex_count, instance_count, first_vertex, first_instance);
+    }
+}
+
+void VulkanBackend::cmd_draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t first_index, int32_t vertex_offset, uint32_t first_instance) {
+    rec_state_.recorded_draw_indexed++;
+    rec_state_.recorded_draws++;
+    stats_.draw_calls++;
+    if (!is_mock_ && initialized_ && rec_state_.is_recording && !command_buffers_.empty()) {
+        VkCommandBuffer cmd = command_buffers_[current_frame_];
+        vkCmdDrawIndexed(cmd, index_count, instance_count, first_index, vertex_offset, first_instance);
+    }
+}
+
+void VulkanBackend::cmd_set_viewport(float x, float y, float width, float height, float min_depth, float max_depth) {
+    rec_state_.active_viewport_x = x;
+    rec_state_.active_viewport_y = y;
+    rec_state_.active_viewport_width = width;
+    rec_state_.active_viewport_height = height;
+    if (!is_mock_ && initialized_ && rec_state_.is_recording && !command_buffers_.empty()) {
+        VkCommandBuffer cmd = command_buffers_[current_frame_];
+        VkViewport vp{x, y, width, height, min_depth, max_depth};
+        vkCmdSetViewport(cmd, 0, 1, &vp);
+    }
+}
+
+void VulkanBackend::cmd_set_scissor(int32_t x, int32_t y, uint32_t width, uint32_t height) {
+    rec_state_.active_scissor.offset = {x, y};
+    rec_state_.active_scissor.extent = {width, height};
+    if (!is_mock_ && initialized_ && rec_state_.is_recording && !command_buffers_.empty()) {
+        VkCommandBuffer cmd = command_buffers_[current_frame_];
+        VkRect2D scissor{{x, y}, {width, height}};
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+    }
+}
+
+void VulkanBackend::cmd_clear_color(VkImage image, VkImageLayout layout, const VkClearColorValue *color, uint32_t range_count, const VkImageSubresourceRange *ranges) {
+    rec_state_.recorded_clears++;
+    if (!is_mock_ && initialized_ && rec_state_.is_recording && !command_buffers_.empty()) {
+        VkCommandBuffer cmd = command_buffers_[current_frame_];
+        vkCmdClearColorImage(cmd, image, layout, color, range_count, ranges);
+    }
+}
+
+void VulkanBackend::cmd_bind_uniform_buffer(uint32_t stage, uint32_t slot, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize range) {
+    rec_state_.recorded_uniform_binds++;
+    rec_state_.last_uniform_stage = stage;
+    rec_state_.last_uniform_slot = slot;
+    rec_state_.last_uniform_offset = static_cast<uint32_t>(offset);
+    rec_state_.last_uniform_size = static_cast<size_t>(range);
+    (void)buffer;
+}
+
+void VulkanBackend::cmd_update_uniform_buffer(uint32_t stage, uint32_t slot, const void *data, size_t size) {
+    rec_state_.recorded_uniform_binds++;
+    rec_state_.last_uniform_stage = stage;
+    rec_state_.last_uniform_slot = slot;
+    rec_state_.last_uniform_size = size;
+    (void)data;
+}
+
+bool VulkanBackend::present_texture(uint64_t queue, uint64_t window, int texture_index) {
+    (void)queue;
+    (void)window;
+    (void)texture_index;
+
+    if (is_mock_) {
+        rec_state_.is_recording = false;
+        return true;
+    }
+
+    if (!initialized_) return false;
+
+    VkCommandBuffer cmd = command_buffers_[current_frame_];
+
+    // Transition color attachment to present layout
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    if (current_image_index_ < swapchain_images_.size()) {
+        barrier.image = swapchain_images_[current_image_index_];
+    }
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    barrier.dstAccessMask = 0;
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                         0,
+                         0, nullptr,
+                         0, nullptr,
+                         1, &barrier);
+
+    end_frame();
+    return true;
 }
 
 } // namespace totk::graphics

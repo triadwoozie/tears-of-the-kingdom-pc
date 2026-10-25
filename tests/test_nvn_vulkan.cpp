@@ -2,6 +2,8 @@
 #include "graphics/nvn_buffer_cache.h"
 #include "graphics/nvn_conditional_draw.h"
 #include "graphics/vk_pipeline_cache.h"
+#include "graphics/nvn_vk.h"
+#include "graphics/hle_nvn_gen.h"
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -114,6 +116,71 @@ void test_pipeline_cache_progress() {
     std::printf("  -> Pipeline Cache Progress: PASSED\n");
 }
 
+void test_vulkan_command_recording_and_presentation() {
+    std::printf("[Test] Running test_vulkan_command_recording_and_presentation...\n");
+    totk::graphics::VulkanBackend backend;
+    bool init_ok = backend.initialize_mock();
+    assert(init_ok);
+    assert(backend.is_mock());
+    assert(totk::graphics::VulkanBackend::get_active() == &backend);
+
+    // 1. Begin recording
+    backend.begin_command_recording();
+    assert(backend.get_recording_state().is_recording);
+
+    // 2. Viewport and Scissor
+    backend.cmd_set_viewport(0.0f, 0.0f, 1920.0f, 1080.0f);
+    assert(backend.get_recording_state().active_viewport_width == 1920.0f);
+    assert(backend.get_recording_state().active_viewport_height == 1080.0f);
+
+    backend.cmd_set_scissor(10, 20, 1900, 1040);
+    assert(backend.get_recording_state().active_scissor.offset.x == 10);
+    assert(backend.get_recording_state().active_scissor.offset.y == 20);
+    assert(backend.get_recording_state().active_scissor.extent.width == 1900);
+    assert(backend.get_recording_state().active_scissor.extent.height == 1040);
+
+    // 3. Vertex and Index bindings
+    backend.cmd_bind_vertex_buffers(0, 2, nullptr, nullptr);
+    assert(backend.get_recording_state().recorded_vertex_binds == 2);
+
+    // 4. Draw commands
+    backend.cmd_draw(3, 1, 0, 0);
+    assert(backend.get_recording_state().recorded_draws == 1);
+    assert(backend.get_stats().draw_calls == 1);
+
+    backend.cmd_draw_indexed(6, 1, 0, 0, 0);
+    assert(backend.get_recording_state().recorded_draws == 2);
+    assert(backend.get_recording_state().recorded_draw_indexed == 1);
+    assert(backend.get_stats().draw_calls == 2);
+
+    // 5. Uniform buffers and clears
+    backend.cmd_update_uniform_buffer(1, 3, "data", 4);
+    assert(backend.get_recording_state().recorded_uniform_binds == 1);
+    assert(backend.get_recording_state().last_uniform_stage == 1);
+    assert(backend.get_recording_state().last_uniform_slot == 3);
+
+    backend.cmd_clear_color(VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, nullptr, 0, nullptr);
+    assert(backend.get_recording_state().recorded_clears == 1);
+
+    // 6. Test through HLE function pointers
+    using DrawArraysFn = void (*)(uint64_t, int, int, int);
+    auto draw_fn = reinterpret_cast<DrawArraysFn>(totk::graphics::nvn_get_proc_address("nvnCommandBufferDrawArrays"));
+    assert(draw_fn != nullptr);
+    draw_fn(0, 0, 0, 36);
+    assert(backend.get_recording_state().recorded_draws == 3);
+
+    using PresentFn = void (*)(uint64_t, uint64_t, int);
+    auto present_fn = reinterpret_cast<PresentFn>(totk::graphics::nvn_get_proc_address("nvnQueuePresentTexture"));
+    assert(present_fn != nullptr);
+    present_fn(0, 0, 1);
+    assert(!backend.get_recording_state().is_recording);
+    assert(totk::graphics::get_presented_frame_count() >= 1);
+
+    backend.shutdown();
+    assert(totk::graphics::VulkanBackend::get_active() == nullptr);
+    std::printf("  -> Vulkan 1.3 Command Recording & Presentation: PASSED\n");
+}
+
 int main() {
     std::printf("==================================================\n");
     std::printf("  NVN-to-Vulkan 1.3 Subsystems Unit Tests\n");
@@ -123,6 +190,7 @@ int main() {
     test_buffer_cache_tracking();
     test_conditional_rendering();
     test_pipeline_cache_progress();
+    test_vulkan_command_recording_and_presentation();
 
     std::printf("\nAll NVN-to-Vulkan unit tests PASSED successfully!\n");
     return 0;

@@ -429,9 +429,12 @@ static uint64_t hle_nvnCommandBufferBindTransformFeedbackBuffers(uint64_t x0 = 0
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferBindUniformBuffer(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
-                                uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+static uint64_t hle_nvnCommandBufferBindUniformBuffer(uint64_t cb = 0, uint64_t stage = 0, uint64_t index = 0, uint64_t buffer_addr = 0,
+                                uint64_t size = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
+    (void)cb; (void)x5; (void)x6; (void)x7;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->cmd_bind_uniform_buffer(static_cast<uint32_t>(stage), static_cast<uint32_t>(index), VK_NULL_HANDLE, buffer_addr, size);
+    }
     return 0;
 }
 
@@ -447,9 +450,14 @@ static uint64_t hle_nvnCommandBufferBindVertexAttribState(uint64_t x0 = 0, uint6
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferBindVertexBuffer(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferBindVertexBuffer(uint64_t cb = 0, uint64_t index = 0, uint64_t buffer_addr = 0, uint64_t size = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *backend = VulkanBackend::get_active()) {
+        VkDeviceSize offset = static_cast<VkDeviceSize>(buffer_addr);
+        (void)size;
+        backend->cmd_bind_vertex_buffers(static_cast<uint32_t>(index), 1, nullptr, &offset);
+    }
     return 0;
 }
 
@@ -477,9 +485,20 @@ static uint64_t hle_nvnCommandBufferClearBuffer(uint64_t x0 = 0, uint64_t x1 = 0
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferClearColor(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferClearColor(uint64_t cb = 0, uint64_t index = 0, uint64_t color_ptr = 0, uint64_t mask = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)index; (void)mask; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *backend = VulkanBackend::get_active()) {
+        const float *colors = reinterpret_cast<const float *>(color_ptr);
+        VkClearColorValue cv{};
+        if (colors) {
+            cv.float32[0] = colors[0];
+            cv.float32[1] = colors[1];
+            cv.float32[2] = colors[2];
+            cv.float32[3] = colors[3];
+        }
+        backend->cmd_clear_color(VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, &cv, 0, nullptr);
+    }
     return 0;
 }
 
@@ -586,7 +605,10 @@ static uint64_t hle_nvnCommandBufferDownsampleTextureView(uint64_t x0 = 0, uint6
 }
 
 static void hle_nvnCommandBufferDrawArrays(uint64_t cb, int mode, int first, int count) {
-    (void)cb; (void)mode; (void)first; (void)count;
+    (void)cb; (void)mode;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->cmd_draw(static_cast<uint32_t>(count), 1, static_cast<uint32_t>(first), 0);
+    }
 }
 
 static uint64_t hle_nvnCommandBufferDrawArraysIndirect(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
@@ -602,7 +624,10 @@ static uint64_t hle_nvnCommandBufferDrawArraysInstanced(uint64_t x0 = 0, uint64_
 }
 
 static void hle_nvnCommandBufferDrawElements(uint64_t cb, int mode, int type, int count, const void *indices) {
-    (void)cb; (void)mode; (void)type; (void)count; (void)indices;
+    (void)cb; (void)mode; (void)type; (void)indices;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->cmd_draw_indexed(static_cast<uint32_t>(count), 1, 0, 0, 0);
+    }
 }
 
 static uint64_t hle_nvnCommandBufferDrawElementsBaseVertex(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
@@ -1001,9 +1026,13 @@ static uint64_t hle_nvnCommandBufferSetSamplerPool(uint64_t x0 = 0, uint64_t x1 
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferSetScissor(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
-                                uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+static uint64_t hle_nvnCommandBufferSetScissor(uint64_t cb = 0, uint64_t x = 0, uint64_t y = 0, uint64_t w = 0,
+                                uint64_t h = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
+    (void)cb; (void)x5; (void)x6; (void)x7;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->cmd_set_scissor(static_cast<int32_t>(x), static_cast<int32_t>(y),
+                                 static_cast<uint32_t>(w), static_cast<uint32_t>(h));
+    }
     return 0;
 }
 
@@ -1061,9 +1090,13 @@ static uint64_t hle_nvnCommandBufferSetTiledCacheTileSize(uint64_t x0 = 0, uint6
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferSetViewport(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
-                                uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+static uint64_t hle_nvnCommandBufferSetViewport(uint64_t cb = 0, uint64_t x = 0, uint64_t y = 0, uint64_t w = 0,
+                                uint64_t h = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
+    (void)cb; (void)x5; (void)x6; (void)x7;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->cmd_set_viewport(static_cast<float>(x), static_cast<float>(y),
+                                  static_cast<float>(w), static_cast<float>(h));
+    }
     return 0;
 }
 
@@ -1097,9 +1130,12 @@ static uint64_t hle_nvnCommandBufferTiledDownsampleTextureView(uint64_t x0 = 0, 
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferUpdateUniformBuffer(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
-                                uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+static uint64_t hle_nvnCommandBufferUpdateUniformBuffer(uint64_t cb = 0, uint64_t buffer_addr = 0, uint64_t size = 0, uint64_t offset = 0,
+                                uint64_t data_ptr = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
+    (void)cb; (void)buffer_addr; (void)offset; (void)x5; (void)x6; (void)x7;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->cmd_update_uniform_buffer(0, 0, reinterpret_cast<const void *>(data_ptr), static_cast<size_t>(size));
+    }
     return 0;
 }
 
@@ -1842,8 +1878,10 @@ static uint64_t hle_nvnQueueInitialize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_
 }
 
 static void hle_nvnQueuePresentTexture(uint64_t q, uint64_t win, int tex_idx) {
-    (void)q; (void)win; (void)tex_idx;
     s_frame_counter++;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->present_texture(q, win, tex_idx);
+    }
     if (s_frame_counter <= 10 || s_frame_counter % 60 == 0) {
         std::printf("  [HLE NVN PRESENT] Frame #%llu presented (texture index=%d)!\n",
                     static_cast<unsigned long long>(s_frame_counter), tex_idx);

@@ -33,16 +33,61 @@ struct FrameStats {
     uint32_t active_shaders = 0;
 };
 
+struct CommandRecordingState {
+    bool is_recording = false;
+    float active_viewport_x = 0.0f;
+    float active_viewport_y = 0.0f;
+    float active_viewport_width = 0.0f;
+    float active_viewport_height = 0.0f;
+    VkRect2D active_scissor{};
+    VkPipeline bound_pipeline = VK_NULL_HANDLE;
+    uint64_t recorded_draws = 0;
+    uint64_t recorded_draw_indexed = 0;
+    uint64_t recorded_vertex_binds = 0;
+    uint64_t recorded_uniform_binds = 0;
+    uint64_t recorded_clears = 0;
+    uint32_t last_uniform_stage = 0;
+    uint32_t last_uniform_slot = 0;
+    uint32_t last_uniform_offset = 0;
+    size_t last_uniform_size = 0;
+};
+
 class VulkanBackend {
 public:
     VulkanBackend();
     ~VulkanBackend();
 
+    static VulkanBackend *get_active() { return s_active_backend; }
+    static void set_active(VulkanBackend *backend) { s_active_backend = backend; }
+
     bool initialize(SDL_Window *window, const GraphicsConfig &config);
+    bool initialize_mock();
     void shutdown();
+
+    bool is_mock() const { return is_mock_; }
 
     void begin_frame();
     void end_frame();
+
+    // Vulkan 1.3 Command Recording
+    bool begin_command_recording();
+    void end_command_recording();
+
+    void cmd_bind_pipeline(VkPipeline pipeline, VkPipelineBindPoint bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS);
+    void cmd_bind_vertex_buffers(uint32_t first_binding, uint32_t binding_count, const VkBuffer *buffers, const VkDeviceSize *offsets);
+    void cmd_bind_index_buffer(VkBuffer buffer, VkDeviceSize offset, VkIndexType index_type);
+    void cmd_draw(uint32_t vertex_count, uint32_t instance_count = 1, uint32_t first_vertex = 0, uint32_t first_instance = 0);
+    void cmd_draw_indexed(uint32_t index_count, uint32_t instance_count = 1, uint32_t first_index = 0, int32_t vertex_offset = 0, uint32_t first_instance = 0);
+    void cmd_set_viewport(float x, float y, float width, float height, float min_depth = 0.0f, float max_depth = 1.0f);
+    void cmd_set_scissor(int32_t x, int32_t y, uint32_t width, uint32_t height);
+    void cmd_clear_color(VkImage image, VkImageLayout layout, const VkClearColorValue *color, uint32_t range_count, const VkImageSubresourceRange *ranges);
+    void cmd_bind_uniform_buffer(uint32_t stage, uint32_t slot, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize range);
+    void cmd_update_uniform_buffer(uint32_t stage, uint32_t slot, const void *data, size_t size);
+
+    bool present_texture(uint64_t queue, uint64_t window, int texture_index);
+
+    const CommandRecordingState &get_recording_state() const { return rec_state_; }
+    CommandRecordingState &get_recording_state_mut() { return rec_state_; }
 
     void resize(int width, int height);
 
@@ -52,10 +97,14 @@ public:
     VkQueue get_queue() const { return queue_; }
     uint32_t get_queue_family() const { return queue_family_; }
     VkRenderPass get_render_pass() const { return render_pass_; }
-    VkCommandBuffer get_current_command_buffer() const { return command_buffers_[current_frame_]; }
+    VkCommandBuffer get_current_command_buffer() const {
+        if (command_buffers_.empty()) return VK_NULL_HANDLE;
+        return command_buffers_[current_frame_];
+    }
     const FrameStats &get_stats() const { return stats_; }
 
 private:
+    static inline VulkanBackend *s_active_backend = nullptr;
     bool create_instance();
     bool select_physical_device();
     bool create_device();
@@ -95,6 +144,8 @@ private:
     uint32_t current_frame_ = 0;
     uint32_t current_image_index_ = 0;
     bool initialized_ = false;
+    bool is_mock_ = false;
+    CommandRecordingState rec_state_{};
 };
 
 } // namespace totk::graphics
