@@ -1308,13 +1308,17 @@ void register_sead_hlr_hooks() {
     totk::recompiler::register_recompiled_func(0x71050e35f0ULL, [](Arm64Context *c) {
         if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
             c->x[0] = 0;
-            c->pc = c->x[30];
-            return;
+        } else {
+            uint64_t p = *reinterpret_cast<uint64_t *>(c->x[0] + 0x68);
+            if (p >= 0x7000000000ULL && p < 0x7300000000ULL) {
+                uint8_t b = *reinterpret_cast<uint8_t *>(p);
+                c->x[0] = (b != 0) ? 1 : 0;
+            } else {
+                c->x[0] = 0;
+            }
         }
-        static totk::recompiler::RecompiledFunc s_orig =
-            totk::recompiler::lookup_recompiled_func(0x71050e35f0ULL);
-        if (s_orig) s_orig(c);
-        else c->pc = c->x[30];
+        c->pc = c->x[30];
+        return;
     });
 
     // Guard f_71050e3700 against invalid pointers in its object chains.
