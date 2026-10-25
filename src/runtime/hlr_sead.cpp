@@ -92,6 +92,22 @@ static void hlr_alloc_hook(totk::recompiler::Arm64Context *c) {
 void register_sead_hlr_hooks() {
     using totk::recompiler::Arm64Context;
 
+    static totk::recompiler::RecompiledFunc s_orig_710421e70c =
+        totk::recompiler::lookup_recompiled_func(0x710421e70cULL);
+    (void)s_orig_710421e70c;
+    totk::recompiler::register_recompiled_func(0x710421e70cULL, [](Arm64Context *c) {
+        uint32_t total = 0;
+        uint64_t curr = c->x[0];
+        int depth = 0;
+        while (curr >= 0x7000000000ULL && curr < 0x7300000000ULL - 0x20 && depth < 64) {
+            total += *reinterpret_cast<uint32_t *>(curr + 0x8);
+            curr = *reinterpret_cast<uint64_t *>(curr + 0x18);
+            depth++;
+        }
+        c->x[0] = total;
+        c->pc = c->x[30];
+    });
+
     static totk::recompiler::RecompiledFunc s_orig_71043792d0 =
         totk::recompiler::lookup_recompiled_func(0x71043792d0ULL);
     totk::recompiler::register_recompiled_func(0x71043792d0ULL, [](Arm64Context *c) {
