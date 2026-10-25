@@ -34,6 +34,20 @@ static uint64_t hlr_bump_alloc(uint64_t size, uint64_t align) {
     return res;
 }
 
+static uint64_t get_safe_container_node() {
+    static uint64_t s_node = 0;
+    if (s_node == 0) {
+        s_node = hlr_bump_alloc(0x1000, 0x10);
+        *reinterpret_cast<uint8_t *>(s_node + 0x64) = 1;
+        *reinterpret_cast<uint8_t *>(s_node + 0x65) = 1;
+        *reinterpret_cast<uint8_t *>(s_node + 0x66) = 1;
+        *reinterpret_cast<uint8_t *>(s_node + 0x67) = 1;
+        *reinterpret_cast<uint8_t *>(s_node + 0xa4) = 1;
+        *reinterpret_cast<uint64_t *>(s_node + 0x30) = s_node + 0x100;
+    }
+    return s_node;
+}
+
 static uint64_t get_default_heap() {
     static uint64_t s_default_heap = 0;
     if (s_default_heap == 0) {
@@ -780,6 +794,86 @@ void register_sead_hlr_hooks() {
         }
         c->x[0] = s_dummy_res;
         c->pc = c->x[30];
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_71049b7c88 =
+        totk::recompiler::lookup_recompiled_func(0x71049b7c88ULL);
+    totk::recompiler::register_recompiled_func(0x71049b7c88ULL, [](Arm64Context *c) {
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
+            c->x[0] = get_safe_container_node();
+        }
+        if (s_orig_71049b7c88) {
+            s_orig_71049b7c88(c);
+        } else {
+            c->pc = c->x[30];
+        }
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
+            c->x[0] = get_safe_container_node();
+        }
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_71049b7fb8 =
+        totk::recompiler::lookup_recompiled_func(0x71049b7fb8ULL);
+    totk::recompiler::register_recompiled_func(0x71049b7fb8ULL, [](Arm64Context *c) {
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
+            c->x[0] = get_safe_container_node();
+        }
+        if (s_orig_71049b7fb8) {
+            s_orig_71049b7fb8(c);
+        } else {
+            c->pc = c->x[30];
+        }
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
+            c->x[0] = get_safe_container_node();
+        }
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_71049b8030 =
+        totk::recompiler::lookup_recompiled_func(0x71049b8030ULL);
+    totk::recompiler::register_recompiled_func(0x71049b8030ULL, [](Arm64Context *c) {
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
+            c->x[0] = get_safe_container_node();
+        }
+        if (s_orig_71049b8030) {
+            s_orig_71049b8030(c);
+        } else {
+            c->pc = c->x[30];
+        }
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
+            c->x[0] = get_safe_container_node();
+        }
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_71049b80a8 =
+        totk::recompiler::lookup_recompiled_func(0x71049b80a8ULL);
+    totk::recompiler::register_recompiled_func(0x71049b80a8ULL, [](Arm64Context *c) {
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
+            c->x[0] = get_safe_container_node();
+        }
+        if (s_orig_71049b80a8) {
+            s_orig_71049b80a8(c);
+        } else {
+            c->pc = c->x[30];
+        }
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
+            c->x[0] = get_safe_container_node();
+        }
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_71049b8120 =
+        totk::recompiler::lookup_recompiled_func(0x71049b8120ULL);
+    totk::recompiler::register_recompiled_func(0x71049b8120ULL, [](Arm64Context *c) {
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
+            c->x[0] = get_safe_container_node();
+        }
+        if (s_orig_71049b8120) {
+            s_orig_71049b8120(c);
+        } else {
+            c->pc = c->x[30];
+        }
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
+            c->x[0] = get_safe_container_node();
+        }
     });
 
     // Guard f_7104658020 (null target setter guard)
