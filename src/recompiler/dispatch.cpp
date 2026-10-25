@@ -1227,10 +1227,7 @@ void rt_svc(Arm64Context *c, uint32_t imm, uint64_t pc) {
                 c->x[0] = R_BAD_STATE;
             } else {
                 t->waddr = addr;
-                constexpr int64_t main_thread_poll_timeout_ns = 50'000'000LL;
-                const int64_t effective_timeout_ns =
-                    (timeout_ns == -1 && t->handle == 1) ? main_thread_poll_timeout_ns : timeout_ns;
-                c->x[0] = static_cast<uint64_t>(block_thread(t, 3, effective_timeout_ns, lock));
+                c->x[0] = static_cast<uint64_t>(block_thread(t, 3, timeout_ns, lock));
             }
             break;
         }
