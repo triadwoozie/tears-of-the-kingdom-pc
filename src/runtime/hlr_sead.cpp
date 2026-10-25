@@ -1358,17 +1358,21 @@ void register_sead_hlr_hooks() {
         else fail();
     });
 
-    // Guard f_710437bb60 against invalid object pointers
-    static totk::recompiler::RecompiledFunc s_orig_710437bb60 =
-        totk::recompiler::lookup_recompiled_func(0x710437bb60ULL);
+    // Initialize the format block flag for f_710437bb60
     totk::recompiler::register_recompiled_func(0x710437bb60ULL, [](Arm64Context *c) {
-        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
-            c->x[0] = 0;
-            c->pc = c->x[30];
-            return;
+        if (c->x[0] >= 0x7000000000ULL && c->x[0] < 0x7300000000ULL) {
+            *reinterpret_cast<uint8_t *>(c->x[0] + 0x110) = 1;
         }
-        if (s_orig_710437bb60) s_orig_710437bb60(c);
-        else c->pc = c->x[30];
+        c->x[0] = 0;
+        c->pc = c->x[30];
+    });
+
+    // Initialize the format block flag for f_71042c7744
+    totk::recompiler::register_recompiled_func(0x71042c7744ULL, [](Arm64Context *c) {
+        if (c->x[0] >= 0x7000000000ULL && c->x[0] < 0x7300000000ULL) {
+            *reinterpret_cast<uint8_t *>(c->x[0] + 0x110) = 1;
+        }
+        c->pc = c->x[30];
     });
 
     // Guard nn::util::BinaryFileHeader::GetFirstBlock against invalid object pointers
