@@ -45,6 +45,22 @@ static uint64_t hlr_bump_alloc(uint64_t size, uint64_t align) {
     return res;
 }
 
+static uint64_t get_dummy_sead_resource() {
+    static const uint64_t s_dummy_resource = [] {
+        uint64_t resource = hlr_bump_alloc(0x200, 0x20);
+        uint64_t vtbl = hlr_bump_alloc(0x100, 0x10);
+        for (int i = 0; i < 32; ++i) {
+            *reinterpret_cast<uint64_t *>(vtbl + i * 8) = 0x7104214ea8ULL;
+        }
+        *reinterpret_cast<uint64_t *>(resource) = vtbl;
+        *reinterpret_cast<uint64_t *>(resource + 0x28) = hlr_bump_alloc(0x1000, 0x10);
+        *reinterpret_cast<uint32_t *>(resource + 0x30) = 0x1000;
+        *reinterpret_cast<uint8_t *>(resource + 0x58) = 1;
+        return resource;
+    }();
+    return s_dummy_resource;
+}
+
 static uint64_t get_safe_container_node() {
     static uint64_t s_node = 0;
     if (s_node == 0) {
@@ -623,19 +639,19 @@ void register_sead_hlr_hooks() {
 
     // Hook sead::ResourceMgr::load (0x7104214ea8)
     totk::recompiler::register_recompiled_func(0x7104214ea8ULL, [](Arm64Context *c) {
-        std::printf("  [HLR Hook] sead::ResourceMgr::load (0x7104214ea8) from LR=0x%llx -> returning NULL\n",
+        std::printf("  [HLR Hook] sead::ResourceMgr::load (0x7104214ea8) from LR=0x%llx -> returning dummy resource\n",
                     static_cast<unsigned long long>(c->x[30]));
         std::fflush(stdout);
-        c->x[0] = 0;
+        c->x[0] = get_dummy_sead_resource();
         c->pc = c->x[30];
     });
 
     // Hook sead::ResourceMgr::tryLoad (0x7104215360)
     totk::recompiler::register_recompiled_func(0x7104215360ULL, [](Arm64Context *c) {
-        std::printf("  [HLR Hook] sead::ResourceMgr::tryLoad (0x7104215360) from LR=0x%llx -> returning 0\n",
+        std::printf("  [HLR Hook] sead::ResourceMgr::tryLoad (0x7104215360) from LR=0x%llx -> returning dummy resource\n",
                     static_cast<unsigned long long>(c->x[30]));
         std::fflush(stdout);
-        c->x[0] = 0;
+        c->x[0] = get_dummy_sead_resource();
         c->pc = c->x[30];
     });
 
