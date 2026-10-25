@@ -1864,6 +1864,20 @@ void register_sead_hlr_hooks() {
         c->pc = c->x[30];
     });
 
+    // Bypass SEAD table lookups that can dereference an absent or invalid table.
+    auto bypass_sead_table_lookup = [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    };
+    totk::recompiler::register_recompiled_func(0x7104ccb13cULL, bypass_sead_table_lookup);
+    totk::recompiler::register_recompiled_func(0x7104ccb2acULL, bypass_sead_table_lookup);
+    totk::recompiler::register_recompiled_func(0x7104ccb43cULL, bypass_sead_table_lookup);
+    totk::recompiler::register_recompiled_func(0x7104ccb600ULL, bypass_sead_table_lookup);
+    totk::recompiler::register_recompiled_func(0x7104ccb844ULL, bypass_sead_table_lookup);
+    totk::recompiler::register_recompiled_func(0x7104ccbaacULL, bypass_sead_table_lookup);
+    totk::recompiler::register_recompiled_func(0x7104ccbd5cULL, bypass_sead_table_lookup);
+
     // Guard f_7104cca050 (string table lookup)
     static totk::recompiler::RecompiledFunc s_orig_7104cca050 =
         totk::recompiler::lookup_recompiled_func(0x7104cca050ULL);
