@@ -221,6 +221,19 @@ void test_sarc_archive_indexing() {
     assert(zs_subfile.size() == file2_data.size());
     assert(std::memcmp(zs_subfile.data(), file2_data.data(), file2_data.size()) == 0);
 
+    // 7. Test zero-copy partial slice querying inside SARC pack
+    std::vector<uint8_t> partial_slice;
+    bool slice_ok = fs.read_romfs_file("romfs:/Pack/Bootup.pack/System/Version.txt", 5, 11, partial_slice);
+    assert(slice_ok);
+    assert(partial_slice.size() == 11);
+    assert(std::memcmp(partial_slice.data(), "v1.4.3 Desk", 11) == 0);
+
+    std::vector<uint8_t> direct_slice;
+    bool dslice_ok = fs.read_sarc_file_slice("romfs:/Pack/TitleBG.pack.zs", "System/Version.txt", 0, 4, direct_slice);
+    assert(dslice_ok);
+    assert(direct_slice.size() == 4);
+    assert(std::memcmp(direct_slice.data(), "TotK", 4) == 0);
+
     std::printf("  -> SARC Table of Contents Parser & Fast Hash Indexer: PASSED\n");
 }
 

@@ -432,14 +432,7 @@ bool FileSystemHLE::read_romfs_file(const std::string &guest_path, uint64_t offs
         size_t ext_len = 5; // length of ".pack" or ".sarc"
         std::string archive_part = guest_path.substr(0, pack_pos + ext_len);
         std::string internal_part = guest_path.substr(pack_pos + ext_len + 1);
-        std::vector<uint8_t> full_file;
-        if (read_sarc_file(archive_part, internal_part, full_file)) {
-            if (offset >= full_file.size()) {
-                out_data.clear();
-                return false;
-            }
-            size_t to_copy = (size == 0 || offset + size > full_file.size()) ? (full_file.size() - offset) : size;
-            out_data.assign(full_file.begin() + offset, full_file.begin() + offset + to_copy);
+        if (read_sarc_file_slice(archive_part, internal_part, offset, size, out_data)) {
             return true;
         }
     }
@@ -485,9 +478,24 @@ SarcArchive *FileSystemHLE::get_or_open_sarc(const std::string &archive_guest_pa
 }
 
 bool FileSystemHLE::read_sarc_file(const std::string &archive_guest_path, const std::string &internal_file_path, std::vector<uint8_t> &out_data) {
+    return read_sarc_file_slice(archive_guest_path, internal_file_path, 0, 0, out_data);
+}
+
+bool FileSystemHLE::read_sarc_file_slice(const std::string &archive_guest_path, const std::string &internal_file_path, uint64_t offset, size_t size, std::vector<uint8_t> &out_data) {
     SarcArchive *sarc = get_or_open_sarc(archive_guest_path);
     if (!sarc) return false;
-    return sarc->get_file(internal_file_path, out_data);
+    const uint8_t *view = nullptr;
+    size_t total_len = 0;
+    if (!sarc->get_file_view(internal_file_path, view, total_len)) {
+        return false;
+    }
+    if (offset >= total_len) {
+        out_data.clear();
+        return false;
+    }
+    size_t to_copy = (size == 0 || offset + size > total_len) ? (total_len - offset) : size;
+    out_data.assign(view + offset, view + offset + to_copy);
+    return true;
 }
 
 bool FileSystemHLE::read_compressed_romfs_file(const std::string &guest_path, uint64_t offset, size_t size, std::vector<uint8_t> &out_data) {

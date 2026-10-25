@@ -134,6 +134,7 @@ public:
 
     // Fast SARC / Pack Archive indexing
     bool read_sarc_file(const std::string &archive_guest_path, const std::string &internal_file_path, std::vector<uint8_t> &out_data);
+    bool read_sarc_file_slice(const std::string &archive_guest_path, const std::string &internal_file_path, uint64_t offset, size_t size, std::vector<uint8_t> &out_data);
     SarcArchive *get_or_open_sarc(const std::string &archive_guest_path);
 
     ZstdDecompressor &get_zstd_decompressor() { return zstd_; }
