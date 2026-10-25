@@ -1300,6 +1300,64 @@ void register_sead_hlr_hooks() {
         else c->pc = c->x[30];
     });
 
+    // Guard f_71050e3700 against invalid pointers in its object chains.
+    static totk::recompiler::RecompiledFunc s_orig_71050e3700 =
+        totk::recompiler::lookup_recompiled_func(0x71050e3700ULL);
+    totk::recompiler::register_recompiled_func(0x71050e3700ULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = 0x7000000000ULL;
+        constexpr uint64_t guest_limit = 0x7300000000ULL;
+        auto valid_range = [](uint64_t addr, uint64_t size) {
+            return addr >= guest_base && size <= guest_limit - addr &&
+                   addr <= guest_limit - size;
+        };
+        auto fail = [c]() {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+        };
+
+        if (c->sp < guest_base + 48 || !valid_range(c->sp - 48, 48) ||
+            !valid_range(c->x[0], 1) || !valid_range(c->x[1], 1)) {
+            fail();
+            return;
+        }
+
+        constexpr uint64_t table_slot = 0x710796df40ULL;
+        if (!valid_range(table_slot, sizeof(uint64_t))) {
+            fail();
+            return;
+        }
+        uint64_t table = *reinterpret_cast<const uint64_t *>(table_slot);
+        if (!valid_range(table, 3 * sizeof(uint64_t))) {
+            fail();
+            return;
+        }
+
+        for (uint64_t i = 0; i < 3; ++i) {
+            uint64_t offset = *reinterpret_cast<const uint64_t *>(table + i * sizeof(uint64_t));
+            if (offset > guest_limit - c->x[1] ||
+                !valid_range(c->x[1] + offset, sizeof(uint64_t))) {
+                fail();
+                return;
+            }
+
+            uint64_t object = *reinterpret_cast<const uint64_t *>(c->x[1] + offset);
+            if (object == 0 && i < 2) continue;
+            if (!valid_range(object, 1) ||
+                !valid_range(object + 0x68, sizeof(uint64_t))) {
+                fail();
+                return;
+            }
+            uint64_t state = *reinterpret_cast<const uint64_t *>(object + 0x68);
+            if (!valid_range(state, 1)) {
+                fail();
+                return;
+            }
+        }
+
+        if (s_orig_71050e3700) s_orig_71050e3700(c);
+        else fail();
+    });
+
     // Guard f_710437bb60 against invalid object pointers
     static totk::recompiler::RecompiledFunc s_orig_710437bb60 =
         totk::recompiler::lookup_recompiled_func(0x710437bb60ULL);
