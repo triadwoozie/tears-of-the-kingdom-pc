@@ -79,6 +79,7 @@ private:
     void render_controller_studio_tab();
     void render_graphics_tuner_tab();
     void render_audio_tab();
+    void render_telemetry_tab();
 
     RomState rom_state_;
     ControllerSettings controller_settings_;

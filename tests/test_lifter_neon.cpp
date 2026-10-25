@@ -15,7 +15,7 @@ int main() {
     assert(ctx.sp == 0x7100080000ull);
     assert(ctx.tpidrro_el0 == 0x7100000000ull);
     assert(ctx.x[0] == 0);
-    assert(ctx.v.u128[0] == 0);
+    assert(ctx.v[0] == 0);
 
     // Test SIMDe NEON vector addition
     simde_float32x4_t a = simde_vsetq_lane_f32(1.0f, simde_vdupq_n_f32(0.0f), 0);
@@ -26,11 +26,12 @@ int main() {
     simde_float32x4_t b = simde_vdupq_n_f32(10.0f);
     simde_float32x4_t sum = simde_vaddq_f32(a, b);
 
-    ctx.v.neon_f32[0] = sum;
-    assert(ctx.v.f32[0][0] == 11.0f);
-    assert(ctx.v.f32[0][1] == 12.0f);
-    assert(ctx.v.f32[0][2] == 13.0f);
-    assert(ctx.v.f32[0][3] == 14.0f);
+    *reinterpret_cast<simde_float32x4_t *>(&ctx.v[0]) = sum;
+    const float *f32 = reinterpret_cast<const float *>(&ctx.v[0]);
+    assert(f32[0] == 11.0f);
+    assert(f32[1] == 12.0f);
+    assert(f32[2] == 13.0f);
+    assert(f32[3] == 14.0f);
 
     // Test Jump Table resolution for v1.4.3
     uint64_t target = totk::recompiler::resolve_v143_jump_table(0x393ba0, 0);

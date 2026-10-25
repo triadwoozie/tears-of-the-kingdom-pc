@@ -1,9 +1,12 @@
 #include "kernel_hle.h"
 #include "services_hle.h"
+#include "cpu.h"
+#include "memory_manager.h"
 #include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <thread>
+#include <ctime>
 
 namespace totk::runtime {
 
@@ -101,7 +104,7 @@ uint32_t KernelHLE::svc_signal_process_wide_key(uint64_t key_addr, int32_t count
 uint32_t KernelHLE::svc_sleep_thread(int64_t nano_seconds) {
     if (nano_seconds > 0) {
         std::this_thread::sleep_for(std::chrono::nanoseconds(nano_seconds));
-    } else if (nano_seconds == 0) {
+    } else {
         std::this_thread::yield();
     }
     return ResultSuccess;

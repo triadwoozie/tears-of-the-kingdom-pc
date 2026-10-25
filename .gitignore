@@ -7,6 +7,7 @@ zig-cache/
 zig-out/
 CMakeFiles/
 CMakeCache.txt
+.ninja_log
 __pycache__/
 *.pyc
 

@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <simde/arm/neon.h>
 
 typedef struct __attribute__((aligned(16))) Cpu {
     uint64_t x[32];          // x0-x30 (x[31] unused; sp is separate)
@@ -10,15 +11,26 @@ typedef struct __attribute__((aligned(16))) Cpu {
     uint64_t pc;             // 264: target for indirect dispatch
     uint64_t nzcv;           // 272: flags in bits 31..28
     uint64_t tpidr;          // 280
-    uint64_t tpidrro;        // 288
-    uint64_t excl_addr;      // 296
-    uint64_t excl_val;       // 304
+    union {
+        uint64_t tpidrro;    // 288
+        uint64_t tpidrro_el0;
+    };
+    union {
+        uint64_t excl_addr;  // 296
+        uint64_t exclusive_addr;
+    };
+    union {
+        uint64_t excl_val;   // 304
+        uint64_t exclusive_val;
+    };
     void *thread;            // 312: runtime thread object
     uint64_t fpcr;           // 320: guest FPCR/FPSR (portable FP/SIMD lowering only; the asm path uses the host's)
     uint64_t fpsr;           // 328
     uint8_t _pad[512 - 336];
     __uint128_t v[32];       // 512
 } Cpu;
+
+typedef Cpu Arm64Context;
 
 _Static_assert(offsetof(Cpu, sp) == 256, "sp");
 _Static_assert(offsetof(Cpu, pc) == 264, "pc");
@@ -29,15 +41,24 @@ _Static_assert(offsetof(Cpu, v) == 512, "v");
 
 typedef void (*GuestFn)(Cpu *);
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // ---- runtime services (runtime/*.c)
 void rt_dispatch(Cpu *c);                 // call function at c->pc
-// hook site (tools/patches.py HOOKS, runtime/hle/hooks.c): 0 = run the instruction, 1 = the hook did it all,
-// 2.. = jump to the site's first.. target
 int rt_hook(Cpu *c, uint64_t site);
 void rt_svc(Cpu *c, uint32_t imm, uint64_t pc);
 void rt_brk(Cpu *c, uint32_t imm, uint64_t pc) __attribute__((noreturn));
-void rt_udf(Cpu *c, uint64_t pc) __attribute__((noreturn));
+void rt_udf(Cpu *c, uint64_t pc);
 uint64_t rt_ticks(void);
+void dispatch_blr_x18(Cpu *c);
+uint64_t resolve_v143_jump_table(uint64_t anchor_addr, int32_t index);
+void dump_cpu_state(const Cpu *c, uint64_t target_addr);
+
+#ifdef __cplusplus
+}
+#endif
 
 #if defined(__aarch64__)
 static inline uint64_t rt_get_fpcr(void) { uint64_t v; __asm__ volatile("mrs %0, fpcr" : "=r"(v)); return v; }

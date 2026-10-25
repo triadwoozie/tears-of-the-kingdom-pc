@@ -116,11 +116,17 @@ class Nso:
         strtab = dyn.get(DT_STRTAB, 0)
         self.strtab = strtab
         self.needed = [self.cstr(strtab + n) for n in needed if strtab + n < len(self.image)]
-        # dynsym count from DT_HASH nchain
+        # dynsym count from DT_HASH or (DT_STRTAB - DT_SYMTAB) // 24
         self.syms = []
-        if DT_HASH in dyn and DT_SYMTAB in dyn:
-            nchain = self.u32(dyn[DT_HASH] + 4)
+        if DT_SYMTAB in dyn:
             st = dyn[DT_SYMTAB]
+            strtab = dyn.get(DT_STRTAB, 0)
+            if DT_HASH in dyn:
+                nchain = self.u32(dyn[DT_HASH] + 4)
+            elif strtab > st:
+                nchain = (strtab - st) // 24
+            else:
+                nchain = 0
             for i in range(nchain):
                 o = st + i * 24
                 if o + 24 > len(self.image): break
@@ -136,6 +142,33 @@ class Nso:
                     if o + 24 > len(self.image): break
                     r_off, r_info, r_add = struct.unpack_from('<QQq', self.image, o)
                     self.relocs.append((r_off, r_info & 0xFFFFFFFF, r_info >> 32, r_add))
+
+        DT_RELR = 36
+        DT_RELRSZ = 35
+        if DT_RELR in dyn and DT_RELRSZ in dyn:
+            relr_off = dyn[DT_RELR]
+            relr_sz = dyn[DT_RELRSZ]
+            words = struct.unpack_from(f"<{relr_sz // 8}Q", self.image, relr_off)
+            cur_off = 0
+            for w in words:
+                if (w & 1) == 0:
+                    cur_off = w
+                    if cur_off + 8 <= len(self.image):
+                        addend = struct.unpack_from("<Q", self.image, cur_off)[0]
+                        self.relocs.append((cur_off, R_AARCH64_RELATIVE, 0, addend))
+                    cur_off += 8
+                else:
+                    bitmap = w >> 1
+                    bit = 0
+                    while bitmap:
+                        if bitmap & 1:
+                            off = cur_off + bit * 8
+                            if off + 8 <= len(self.image):
+                                addend = struct.unpack_from("<Q", self.image, off)[0]
+                                self.relocs.append((off, R_AARCH64_RELATIVE, 0, addend))
+                        bitmap >>= 1
+                        bit += 1
+                    cur_off += 63 * 8
 
     def cstr(self, off):
         if off >= len(self.image): return ""

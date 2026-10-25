@@ -15,4 +15,7 @@ void sead_vector3f_normalize(sead::Vector3f &v);
 // Hardware-accelerated CRC32 matching Nintendo's polynomial
 uint32_t sead_calc_crc32(const void *data, size_t size);
 
+// Register permanent HLR hooks for sead heaps, memory allocators, and math
+void register_sead_hlr_hooks();
+
 } // namespace totk::hlr

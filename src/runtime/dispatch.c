@@ -76,7 +76,7 @@ static int unimpl_counts[MAX_HLE];
 static void hle_unimplemented(Cpu *c) {
     int i = (int)((unimpl_pc - HLE_BASE) / 16);
     if (unimpl_counts[i]++ < 3)
-        LOG("[hle] UNIMPLEMENTED %s (x0=%llx x1=%llx lr=%llx) -> returning 0\n", hle_slots[i].name, c->x[0],
+        LOG("[hle] UNIMPLEMENTED %s (x0=%lx x1=%lx lr=%lx) -> returning 0\n", hle_slots[i].name, c->x[0],
             c->x[1], c->x[30]);
     c->x[0] = 0;
 }
@@ -155,7 +155,7 @@ __attribute__((noinline)) static GuestFn dispatch_slow(Cpu *c) {
     if (!f) {
         uint64_t off;
         const char *s = loader_symbol_at(c->x[30], &off);
-        FATAL("no function at %llx (lr=%llx %s+%llx)\n", pc, c->x[30], s ? s : "?", off);
+        FATAL("no function at %lx (lr=%lx %s+%lx)\n", pc, c->x[30], s ? s : "?", off);
     }
     unsigned h = (unsigned)(pc >> 2) & (DCACHE - 1);
     dcache[h].addr = pc;
@@ -218,7 +218,7 @@ const char *rt_host_fn_name(uint64_t pc, uint64_t *offset) {
         else hi = mid;
     }
     if (!lo || pc - byhost[lo - 1][0] > 0x100000) return NULL;
-    snprintf(name, sizeof name, "f_%llx", (unsigned long long)byhost[lo - 1][1]);
+    snprintf(name, sizeof name, "f_%lx", (uint64_t)byhost[lo - 1][1]);
     if (offset) *offset = pc - byhost[lo - 1][0];
     return name;
 }
@@ -234,9 +234,9 @@ void rt_fatal_trace(void) {
     plat_print_backtrace();
     Cpu *c = kernel_current_cpu();
     if (c) {
-        fprintf(stderr, "guest: sp=%llx lr=%llx\n", c->sp, c->x[30]);
+        fprintf(stderr, "guest: sp=%lx lr=%lx\n", c->sp, c->x[30]);
         for (int i = 0; i < 31; i += 4)
-            fprintf(stderr, "  x%-2d %016llx  x%-2d %016llx  x%-2d %016llx  x%-2d %016llx\n", i, c->x[i], i + 1,
+            fprintf(stderr, "  x%-2d %016lx  x%-2d %016lx  x%-2d %016lx  x%-2d %016lx\n", i, c->x[i], i + 1,
                     c->x[i + 1], i + 2, c->x[i + 2], i + 3, c->x[i + 3]);
     }
     plat_fatal_notice();
@@ -246,13 +246,15 @@ void rt_fatal_trace(void) {
 }
 
 void rt_udf(Cpu *c, uint64_t pc) {
-    (void)c;
-    FATAL("undefined instruction / trap at %llx\n", pc);
+    fprintf(stderr, "[Trap] Undefined instruction at 0x%016lx\n", (unsigned long)pc);
+    dump_cpu_state(c, pc);
+    FATAL("undefined instruction / trap at %lx\n", pc);
 }
 
 void rt_brk(Cpu *c, uint32_t imm, uint64_t pc) {
-    (void)c;
-    FATAL("brk #%u at %llx\n", imm, pc);
+    fprintf(stderr, "[Trap] BRK #%u at 0x%016lx\n", imm, (unsigned long)pc);
+    dump_cpu_state(c, pc);
+    FATAL("brk #%u at %lx\n", imm, pc);
 }
 
 // ---- crash reporting
@@ -265,11 +267,11 @@ static uint64_t watch_page;
 static void *watch_thread(void *a) {
     (void)a;
     int r = plat_protect(watch_page, PLAT_PAGE, PLAT_PROT_NONE);
-    fprintf(stderr, "[watch] page %llx protect -> %d\n", (unsigned long long)watch_page, r);
+    fprintf(stderr, "[watch] page %lx protect -> %d\n", (uint64_t)watch_page, r);
     extern volatile int g_watch_stop;
     while (!g_watch_stop) { plat_protect(watch_page, PLAT_PAGE, PLAT_PROT_NONE); usleep(100); }
     plat_protect(watch_page, PLAT_PAGE, PLAT_PROT_RW);
-    fprintf(stderr, "[watch] page %llx released\n", (unsigned long long)watch_page);
+    fprintf(stderr, "[watch] page %lx released\n", (uint64_t)watch_page);
     return NULL;
 }
 volatile int g_watch_stop;  // (set by the watcher's client: the watch ends, the page opens for good)
@@ -303,20 +305,20 @@ bool rt_fault_watch(uint64_t fa, uint64_t pc) {
             last_frame = fr, last_pc = pc;
             uint64_t lo = 0;
             const char *ls = host_sym(lr, &lo);
-            fprintf(stderr, "[watch] frame %llu +%#llx pc %s lr %s+%llx\n", (unsigned long long)fr,
-                    (unsigned long long)(fa - g_watch_lo), host_sym(pc, NULL) ? host_sym(pc, NULL) : "?", ls ? ls : "?", (unsigned long long)lo);
+            fprintf(stderr, "[watch] frame %lu +%#lx pc %s lr %s+%lx\n", (uint64_t)fr,
+                    (uint64_t)(fa - g_watch_lo), host_sym(pc, NULL) ? host_sym(pc, NULL) : "?", ls ? ls : "?", (uint64_t)lo);
         }
         static char seen[64][48];
         static int nseen;
         const char *nm = host_sym(pc, NULL);
         if (!nm) nm = "?";
         char key[48];  // (each function + offset once)
-        snprintf(key, sizeof key, "%.36s+%llx", nm, (unsigned long long)(fa - g_watch_lo));
+        snprintf(key, sizeof key, "%.36s+%lx", nm, (uint64_t)(fa - g_watch_lo));
         bool found = false;
         for (int i = 0; i < nseen; i++) found |= !strcmp(seen[i], key);
         if (!found && nseen < 64) {
             snprintf(seen[nseen++], 48, "%s", key);
-            fprintf(stderr, "[watch] +%#llx by %s\n", fa - g_watch_lo, nm);
+            fprintf(stderr, "[watch] +%#lx by %s\n", fa - g_watch_lo, nm);
         }
     }
     plat_protect(watch_page, PLAT_PAGE, PLAT_PROT_RW);
@@ -327,9 +329,9 @@ void rt_fault_report(const char *what, uint64_t fa, uint64_t pc, uint64_t lr) {
     rt_crash_fault(what, fa, pc);
     uint64_t po = 0, lo = 0;
     const char *ps = host_sym(pc, &po), *ls = host_sym(lr, &lo);
-    fprintf(stderr, "\n*** %s accessing %#llx\n    host pc %llx (%s+%llx)\n    host lr %llx (%s)\n", what,
-            (unsigned long long)fa, (unsigned long long)pc, ps ? ps : "?", (unsigned long long)po,
-            (unsigned long long)lr, ls ? ls : "?");
+    fprintf(stderr, "\n*** %s accessing %#lx\n    host pc %lx (%s+%lx)\n    host lr %lx (%s)\n", what,
+            (uint64_t)fa, (uint64_t)pc, ps ? ps : "?", (uint64_t)po,
+            (uint64_t)lr, ls ? ls : "?");
     rt_fatal_trace();
 }
 

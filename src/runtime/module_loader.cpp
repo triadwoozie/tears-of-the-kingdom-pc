@@ -147,7 +147,15 @@ ModuleLoader &ModuleLoader::instance() {
 }
 
 bool ModuleLoader::load(const std::string &path) {
-    unload();
+    if (m_handle) {
+#if defined(_WIN32)
+        FreeLibrary(reinterpret_cast<HMODULE>(m_handle));
+#else
+        dlclose(m_handle);
+#endif
+        m_handle = nullptr;
+    }
+    m_registered_hooks.clear();
     m_module_path = path;
     m_last_error.clear();
 
@@ -330,9 +338,15 @@ bool ModuleLoader::parse_and_map_nso(const uint8_t *raw, size_t raw_size, uint64
             uint64_t hash_off = dyn[4]; // DT_HASH
 
             // Parse Symbols
-            if (strtab != 0 && symtab != 0 && hash_off != 0 && hash_off + 8 <= total_size) {
-                uint32_t nchain = *reinterpret_cast<const uint32_t *>(guest_dest + hash_off + 4);
-                for (uint32_t i = 0; i < nchain; ++i) {
+            if (strtab != 0 && symtab != 0) {
+                uint32_t sym_count = 0;
+                if (hash_off != 0 && hash_off + 8 <= total_size) {
+                    sym_count = *reinterpret_cast<const uint32_t *>(guest_dest + hash_off + 4);
+                } else if (strtab > symtab) {
+                    sym_count = static_cast<uint32_t>((strtab - symtab) / 24);
+                }
+
+                for (uint32_t i = 0; i < sym_count; ++i) {
                     uint64_t sym_offset = symtab + i * 24;
                     if (sym_offset + 24 > total_size) break;
 
@@ -372,6 +386,17 @@ bool ModuleLoader::parse_and_map_nso(const uint8_t *raw, size_t raw_size, uint64
                         r.type = static_cast<uint32_t>(r_info & 0xFFFFFFFF);
                         r.sym_idx = static_cast<uint32_t>(r_info >> 32);
                         r.addend = r_addend;
+
+                        if (r.sym_idx > 0 && symtab != 0 && strtab != 0) {
+                            uint64_t s_off = symtab + r.sym_idx * 24;
+                            if (s_off + 24 <= total_size) {
+                                uint32_t st_name = *reinterpret_cast<const uint32_t *>(guest_dest + s_off);
+                                if (strtab + st_name < total_size) {
+                                    r.sym_name = reinterpret_cast<const char *>(guest_dest + strtab + st_name);
+                                }
+                            }
+                        }
+
                         mod.relocations.push_back(r);
                     }
                 }
@@ -420,10 +445,19 @@ size_t ModuleLoader::apply_relocations() {
                 case 1025: // R_AARCH64_GLOB_DAT
                 case 1026: // R_AARCH64_JUMP_SLOT
                 case 257:  // R_AARCH64_ABS64
-                    // Resolve via sym_idx in dynsym
-                    *target_slot = mod.base_addr + r.addend;
+                {
+                    uint64_t target_val = 0;
+                    if (!r.sym_name.empty()) {
+                        target_val = resolve_guest_symbol(r.sym_name);
+                    }
+                    if (target_val != 0) {
+                        *target_slot = target_val + r.addend;
+                    } else {
+                        *target_slot = mod.base_addr + r.addend;
+                    }
                     applied_count++;
                     break;
+                }
                 default:
                     break;
             }

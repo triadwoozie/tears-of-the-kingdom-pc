@@ -41,6 +41,7 @@ struct ElfRelocation {
     uint32_t type;
     uint32_t sym_idx;
     int64_t addend;
+    std::string sym_name;
 };
 
 struct LoadedModule {

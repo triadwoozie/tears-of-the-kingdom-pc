@@ -68,7 +68,6 @@ endif()
 # TotK Runtime Library
 add_library(totk_recomp_runtime STATIC
     src/runtime/paths.c
-    src/runtime/dispatch.c
     src/runtime/memory_manager.cpp
     src/runtime/kernel_hle.cpp
     src/runtime/threads_hle.cpp
@@ -99,6 +98,7 @@ target_include_directories(totk_recomp_recompiler PUBLIC
     src/runtime/
     ${SIMDE_INCLUDE_DIR}
 )
+target_link_libraries(totk_recomp_recompiler PUBLIC totk_recomp_runtime)
 
 # TotK Graphics Library
 add_library(totk_recomp_graphics STATIC
@@ -146,7 +146,9 @@ target_link_libraries(totk_recomp PRIVATE
     totk_recomp_ui
     totk_recomp_graphics
     totk_recomp_runtime
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wl,--whole-archive>
     totk_recomp_recompiler
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wl,--no-whole-archive>
     imgui
     volk
     SDL3::SDL3
@@ -154,6 +156,7 @@ target_link_libraries(totk_recomp PRIVATE
 if(NOT MSVC)
     target_link_libraries(totk_recomp PRIVATE m dl pthread)
 endif()
+set_target_properties(totk_recomp PROPERTIES ENABLE_EXPORTS ON)
 
 # ==============================================================================
 # Testing Suite (CTest)
@@ -190,3 +193,4 @@ add_totk_test(test_kernel_sync tests/test_kernel_sync.cpp)
 add_totk_test(test_nvn_vulkan tests/test_nvn_vulkan.cpp)
 add_totk_test(test_audio_hid tests/test_audio_hid.cpp)
 add_totk_test(test_module_loader tests/test_module_loader.cpp)
+add_totk_test(test_fs_ipc tests/test_fs_ipc.cpp)

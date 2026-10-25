@@ -12,6 +12,8 @@
 
 namespace totk::graphics {
 
+void *nvn_get_proc_address(const char *name);
+
 // Frame presentation callback for tracing
 using FramePresentCallback = void (*)(uint64_t frame_index);
 static FramePresentCallback s_present_callback = nullptr;
@@ -196,7 +198,7 @@ static uint64_t hle_nvnBufferGetSize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t 
 static uint64_t hle_nvnBufferInitialize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
     (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    return 1; // NVNboolean true
 }
 
 static uint64_t hle_nvnBufferInvalidateMappedRange(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
@@ -720,7 +722,7 @@ static uint64_t hle_nvnCommandBufferGetMemoryCallbackData(uint64_t x0 = 0, uint6
 static uint64_t hle_nvnCommandBufferInitialize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
     (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    return 1; // NVNboolean true
 }
 
 static uint64_t hle_nvnCommandBufferInsertDebugMarker(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
@@ -1253,8 +1255,10 @@ static void hle_nvnDeviceGetInteger(uint64_t dev, int pname, int *v) {
 
 static uint64_t hle_nvnDeviceGetProcAddress(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    (void)x0; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    const char *name = reinterpret_cast<const char *>(x1);
+    void *fn = nvn_get_proc_address(name);
+    return reinterpret_cast<uint64_t>(fn);
 }
 
 static uint64_t hle_nvnDeviceGetSeparateSamplerHandle(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
@@ -1391,7 +1395,7 @@ static uint64_t hle_nvnEventGetValue(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t 
 static uint64_t hle_nvnEventInitialize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
     (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    return 1; // NVNboolean true
 }
 
 static uint64_t hle_nvnEventSignal(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
@@ -1702,7 +1706,7 @@ static uint64_t hle_nvnProgramFinalize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_
 static uint64_t hle_nvnProgramInitialize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
     (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    return 1; // NVNboolean true
 }
 
 static uint64_t hle_nvnProgramSetDebugLabel(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
@@ -1714,7 +1718,7 @@ static uint64_t hle_nvnProgramSetDebugLabel(uint64_t x0 = 0, uint64_t x1 = 0, ui
 static uint64_t hle_nvnProgramSetShaders(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
     (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    return 1; // NVNboolean true
 }
 
 static uint64_t hle_nvnProgramSetSubroutineLinkage(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
@@ -1834,12 +1838,17 @@ static uint64_t hle_nvnQueueGetTotalControlMemoryUsed(uint64_t x0 = 0, uint64_t 
 static uint64_t hle_nvnQueueInitialize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
     (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    return 1; // NVNboolean true
 }
 
 static void hle_nvnQueuePresentTexture(uint64_t q, uint64_t win, int tex_idx) {
     (void)q; (void)win; (void)tex_idx;
     s_frame_counter++;
+    if (s_frame_counter <= 10 || s_frame_counter % 60 == 0) {
+        std::printf("  [HLE NVN PRESENT] Frame #%llu presented (texture index=%d)!\n",
+                    static_cast<unsigned long long>(s_frame_counter), tex_idx);
+        std::fflush(stdout);
+    }
     if (s_present_callback) {
         s_present_callback(s_frame_counter);
     }
@@ -2092,7 +2101,7 @@ static uint64_t hle_nvnSamplerGetWrapMode(uint64_t x0 = 0, uint64_t x1 = 0, uint
 static uint64_t hle_nvnSamplerInitialize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
     (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    return 1; // NVNboolean true
 }
 
 static uint64_t hle_nvnSamplerPoolFinalize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
@@ -2122,7 +2131,7 @@ static uint64_t hle_nvnSamplerPoolGetSize(uint64_t x0 = 0, uint64_t x1 = 0, uint
 static uint64_t hle_nvnSamplerPoolInitialize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
     (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    return 1; // NVNboolean true
 }
 
 static uint64_t hle_nvnSamplerPoolRegisterSampler(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
@@ -2587,7 +2596,7 @@ static uint64_t hle_nvnTexturePoolGetSize(uint64_t x0 = 0, uint64_t x1 = 0, uint
 static uint64_t hle_nvnTexturePoolInitialize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
     (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    return 1; // NVNboolean true
 }
 
 static uint64_t hle_nvnTexturePoolRegisterImage(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
@@ -2782,9 +2791,35 @@ static uint64_t hle_nvnVertexStreamStateSetStride(uint64_t x0 = 0, uint64_t x1 =
     return 0;
 }
 
+struct NvnWindowBuilderInternal {
+    void *device = nullptr;
+    void *native_window = nullptr;
+    int num_textures = 0;
+    void *textures[8]{nullptr};
+    int present_interval = 1;
+};
+
+struct NvnWindowInternal {
+    uint32_t magic = 0x444E4957; // "WIND"
+    void *native_window = nullptr;
+    int num_textures = 0;
+    void *textures[8]{nullptr};
+    int present_interval = 1;
+    int next_texture_idx = 0;
+};
+
 static uint64_t hle_nvnWindowAcquireTexture(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x1; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    auto *w = reinterpret_cast<NvnWindowInternal *>(x0);
+    int *out_idx = reinterpret_cast<int *>(x2);
+    if (out_idx) {
+        if (w && w->num_textures > 0) {
+            *out_idx = w->next_texture_idx++ % w->num_textures;
+        } else {
+            *out_idx = 0;
+        }
+    }
     return 0;
 }
 
@@ -2802,31 +2837,53 @@ static uint64_t hle_nvnWindowBuilderGetPresentInterval(uint64_t x0 = 0, uint64_t
 
 static uint64_t hle_nvnWindowBuilderSetDefaults(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    auto *b = reinterpret_cast<NvnWindowBuilderInternal *>(x0);
+    if (b) {
+        *b = {};
+        b->present_interval = 1;
+    }
     return 0;
 }
 
 static uint64_t hle_nvnWindowBuilderSetDevice(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    auto *b = reinterpret_cast<NvnWindowBuilderInternal *>(x0);
+    if (b) b->device = reinterpret_cast<void *>(x1);
     return 0;
 }
 
 static uint64_t hle_nvnWindowBuilderSetNativeWindow(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    auto *b = reinterpret_cast<NvnWindowBuilderInternal *>(x0);
+    if (b) b->native_window = reinterpret_cast<void *>(x1);
     return 0;
 }
 
 static uint64_t hle_nvnWindowBuilderSetPresentInterval(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    auto *b = reinterpret_cast<NvnWindowBuilderInternal *>(x0);
+    if (b) b->present_interval = static_cast<int>(x1);
     return 0;
 }
 
 static uint64_t hle_nvnWindowBuilderSetTextures(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    auto *b = reinterpret_cast<NvnWindowBuilderInternal *>(x0);
+    int n = static_cast<int>(x1);
+    void **texs = reinterpret_cast<void **>(x2);
+    if (b) {
+        b->num_textures = (n < 0 ? 0 : (n > 8 ? 8 : n));
+        if (texs) {
+            for (int i = 0; i < b->num_textures; ++i) {
+                b->textures[i] = texs[i];
+            }
+        }
+    }
     return 0;
 }
 
@@ -2856,8 +2913,24 @@ static uint64_t hle_nvnWindowGetPresentInterval(uint64_t x0 = 0, uint64_t x1 = 0
 
 static uint64_t hle_nvnWindowInitialize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    auto *w = reinterpret_cast<NvnWindowInternal *>(x0);
+    auto *b = reinterpret_cast<const NvnWindowBuilderInternal *>(x1);
+    if (w) {
+        *w = {};
+        w->magic = 0x444E4957;
+        if (b) {
+            w->native_window = b->native_window;
+            w->num_textures = b->num_textures;
+            w->present_interval = b->present_interval;
+            for (int i = 0; i < b->num_textures; ++i) {
+                w->textures[i] = b->textures[i];
+            }
+        }
+        std::printf("  [HLE NVN] nvnWindowInitialize window=%p textures=%d\n", static_cast<void *>(w), w->num_textures);
+        std::fflush(stdout);
+    }
+    return 1;
 }
 
 static uint64_t hle_nvnWindowSetCrop(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
