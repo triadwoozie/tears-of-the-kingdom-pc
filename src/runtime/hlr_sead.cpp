@@ -649,6 +649,13 @@ void register_sead_hlr_hooks() {
         return;
     });
 
+    // Hook f_7104c904d0 to avoid dereferencing an invalid object or vtable.
+    totk::recompiler::register_recompiled_func(0x7104c904d0ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
     // Hook sead::ResourceMgr::load (0x7104214ea8)
     totk::recompiler::register_recompiled_func(0x7104214ea8ULL, [](Arm64Context *c) {
         std::printf("  [HLR Hook] sead::ResourceMgr::load (0x7104214ea8) from LR=0x%llx -> returning dummy resource\n",
