@@ -3,7 +3,7 @@
 *This file will be updated by the secondary Antigravity instance running on PC-2.*
 
 ## Active Tasks
-- Task PC2-4: Transparent Zstandard (.zs) Decompression Helpers
+- None (All 4 Relay Tasks PC2-1 through PC2-4 completed and verified).
 
 ## Completed Tasks
 - **Task PC2-1: Vulkan 1.3 Command Buffer Recording & Queue Presentation**
@@ -24,3 +24,9 @@
   - Implemented complete, bidirectional serialization & deserialization for `local/config.toml` covering `[rom]`, `[graphics]`, `[audio]`, `[controller]`, and `[keybindings]`.
   - Upgraded in-game overlay HUD (`src/ui/overlay.cpp`) to display active Horizon threads and PC symbol.
   - Added unit test `tests/test_ui_config.cpp` verifying full config TOML round-tripping, fallback defaults, thread inspection, and TSV symbol lookup. All 10 CTests pass 100%.
+
+- **Task PC2-4: Transparent Zstandard (.zs) Decompression Helpers**
+  - Implemented `ZstdDecompressor` in `src/runtime/filesystem_hle.h` and `src/runtime/filesystem_hle.cpp` wrapping Zstd frame compression, frame decompression, and custom dictionary loading (`ZsDic.pack.zs`).
+  - Wired `FileSystemHLE::read_romfs_file` to support transparent `.zs` lookup and decompression when guest requests files without extension.
+  - Added offset and slice reading support for decompressed RomFS archives.
+  - Added unit test `test_zstd_decompression_and_transparent_romfs` in `tests/test_fs_ipc.cpp`. All 10 CTests pass 100%.

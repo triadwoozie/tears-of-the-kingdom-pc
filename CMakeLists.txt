@@ -86,7 +86,7 @@ target_include_directories(totk_recomp_runtime PUBLIC
 )
 target_link_libraries(totk_recomp_runtime PUBLIC SDL3::SDL3)
 if(NOT MSVC)
-    target_link_libraries(totk_recomp_runtime PUBLIC m dl pthread)
+    target_link_libraries(totk_recomp_runtime PUBLIC m dl pthread zstd)
 endif()
 
 # TotK Recompiler Library
@@ -156,7 +156,7 @@ target_link_libraries(totk_recomp PRIVATE
     SDL3::SDL3
 )
 if(NOT MSVC)
-    target_link_libraries(totk_recomp PRIVATE m dl pthread)
+    target_link_libraries(totk_recomp PRIVATE m dl pthread zstd)
 endif()
 set_target_properties(totk_recomp PROPERTIES ENABLE_EXPORTS ON)
 
@@ -186,7 +186,7 @@ function(add_totk_test TEST_NAME TEST_SRC)
         SDL3::SDL3
     )
     if(NOT MSVC)
-        target_link_libraries(${TEST_NAME} PRIVATE m dl pthread)
+        target_link_libraries(${TEST_NAME} PRIVATE m dl pthread zstd)
     endif()
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
 endfunction()

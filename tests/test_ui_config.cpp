@@ -7,8 +7,10 @@
 
 void test_config_roundtrip() {
     std::printf("[Test] Running test_config_roundtrip...\n");
+    std::filesystem::remove("local/config.toml");
     std::filesystem::create_directories("work/temporary");
     const std::string test_path = "work/temporary/test_config.toml";
+    std::filesystem::remove(test_path);
 
     totk::ui::Studio studio1;
     // Verify defaults
@@ -68,6 +70,9 @@ void test_config_roundtrip() {
     assert(std::abs(studio2.get_controller_settings().gyro_sensitivity - 1.5f) < 0.001f);
     assert(studio2.get_controller_settings().keybindings.btn_a == 10);
     assert(studio2.get_controller_settings().keybindings.btn_b == 11);
+
+    std::filesystem::remove("local/config.toml");
+    std::filesystem::remove(test_path);
 
     std::printf("  -> Config TOML Serialization Round-trip: PASSED\n");
 }

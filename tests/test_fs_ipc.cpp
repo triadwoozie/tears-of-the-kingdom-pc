@@ -81,6 +81,57 @@ void test_ipc_services() {
     std::printf("  -> Horizon IPC Service Dispatch: PASSED\n");
 }
 
+void test_zstd_decompression_and_transparent_romfs() {
+    std::printf("[Test] Running test_zstd_decompression_and_transparent_romfs...\n");
+
+    // 1. Test standard Zstd frame compression & decompression
+    const std::string original_payload = "Tears of the Kingdom RomFS Zstandard Decompression Test String 2026";
+    std::vector<uint8_t> compressed;
+    bool comp_ok = totk::runtime::ZstdDecompressor::compress_frame(
+        original_payload.data(), original_payload.size(), compressed, 3
+    );
+    assert(comp_ok);
+    assert(!compressed.empty());
+
+    std::vector<uint8_t> decompressed;
+    bool decomp_ok = totk::runtime::ZstdDecompressor::decompress_frame(
+        compressed.data(), compressed.size(), decompressed
+    );
+    assert(decomp_ok);
+    assert(decompressed.size() == original_payload.size());
+    assert(std::memcmp(decompressed.data(), original_payload.data(), original_payload.size()) == 0);
+
+    // 2. Test transparent RomFS reading of .zs files
+    auto &fs = totk::runtime::FileSystemHLE::instance();
+    fs.mount_romfs("work/test_romfs");
+
+    // Write a .zs compressed file to work/test_romfs/Actor/ActorInfo.product.byml.zs
+    bool write_ok = fs.write_file("work/test_romfs/Actor/ActorInfo.product.byml.zs", compressed.data(), compressed.size());
+    assert(write_ok);
+
+    // Transparent read of "romfs:/Actor/ActorInfo.product.byml" (without .zs extension!)
+    std::vector<uint8_t> transparent_out;
+    bool trans_ok = fs.read_romfs_file("romfs:/Actor/ActorInfo.product.byml", 0, 0, transparent_out);
+    assert(trans_ok);
+    assert(transparent_out.size() == original_payload.size());
+    assert(std::memcmp(transparent_out.data(), original_payload.data(), original_payload.size()) == 0);
+
+    // Offset reading of transparent .zs file
+    std::vector<uint8_t> slice_out;
+    bool slice_ok = fs.read_romfs_file("romfs:/Actor/ActorInfo.product.byml", 6, 14, slice_out);
+    assert(slice_ok);
+    assert(slice_out.size() == 14);
+    assert(std::memcmp(slice_out.data(), "of the Kingdom", 14) == 0);
+
+    // 3. Test dictionary initialization
+    const char mock_dict[] = "TotKCustomDictionaryPayload_ZsDic.pack.zs";
+    bool dict_ok = fs.get_zstd_decompressor().load_dictionary(mock_dict, sizeof(mock_dict));
+    assert(dict_ok);
+    assert(fs.get_zstd_decompressor().has_dictionary());
+
+    std::printf("  -> Zstandard Frame & Transparent RomFS Decompression: PASSED\n");
+}
+
 int main() {
     std::printf("=====================================================\n");
     std::printf("  TotK-Recomp: Unit Test - FileSystem & IPC\n");
@@ -88,6 +139,7 @@ int main() {
 
     test_filesystem_operations();
     test_ipc_services();
+    test_zstd_decompression_and_transparent_romfs();
 
     std::printf("\nAll FileSystem and IPC verification tests PASSED!\n");
     return 0;
