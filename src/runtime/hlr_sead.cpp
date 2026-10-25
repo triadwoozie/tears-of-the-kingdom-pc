@@ -1196,6 +1196,9 @@ void register_sead_hlr_hooks() {
             uint64_t sub_sub = hlr_bump_alloc(0x200, 0x40);
             *reinterpret_cast<uint64_t *>(sub + 0x48) = sub_sub;
             *reinterpret_cast<uint32_t *>(sub_sub + 0xe0) = 0;
+            uint64_t sub_c0 = hlr_bump_alloc(0x100, 0x20);
+            *reinterpret_cast<uint32_t *>(sub_c0 + 0x10) = 0;
+            *reinterpret_cast<uint64_t *>(s_dummy_inst + 0xc0) = sub_c0;
         }
         *reinterpret_cast<uint64_t *>(0x7107ad27c8ULL) = s_dummy_inst;
 
@@ -1204,6 +1207,97 @@ void register_sead_hlr_hooks() {
         } else {
             c->pc = c->x[30];
         }
+    });
+
+    // Guard f_7104a24ed4 (heap/allocator property query)
+    totk::recompiler::register_recompiled_func(0x7104a24ed4ULL, [](Arm64Context *c) {
+        if (c->x[0] >= 0x7000000000ULL && c->x[0] < 0x7300000000ULL) {
+            uint64_t p = *reinterpret_cast<uint64_t *>(c->x[0] + 0xc0);
+            if (p >= 0x7000000000ULL && p < 0x7300000000ULL) {
+                c->x[0] = *reinterpret_cast<uint32_t *>(p + 0x10);
+            } else {
+                c->x[0] = 0;
+            }
+        } else {
+            c->x[0] = 0;
+        }
+        c->pc = c->x[30];
+    });
+
+    // Guard f_710499ca78 (log buffer flush / string termination -> clean return 1)
+    totk::recompiler::register_recompiled_func(0x710499ca78ULL, [](Arm64Context *c) {
+        c->x[0] = 1;
+        c->pc = c->x[30];
+    });
+
+    // Guard f_71043784dc (resource relocation check & dispatch)
+    totk::recompiler::register_recompiled_func(0x71043784dcULL, [](Arm64Context *c) {
+        std::printf("  [HLR Hook] f_71043784dc (resource relocation) res=0x%llx -> marked relocated\n",
+                    static_cast<unsigned long long>(c->x[0]));
+        std::fflush(stdout);
+        c->pc = c->x[30];
+    });
+
+    // Guard nn::util::RelocationTable::Relocate (0x710c081aa0) and PLT 0x7106bb7bb0
+    auto hook_reloc_table = [](uint64_t addr) {
+        totk::recompiler::register_recompiled_func(addr, [](Arm64Context *c) {
+            uint64_t table = c->x[0];
+            if (table >= 0x7000000000ULL && table < 0x7300000000ULL) {
+                uint32_t count = *reinterpret_cast<uint32_t *>(table + 8);
+                if (count > 50000) {
+                    std::printf("  [HLR Hook] RelocationTable::Relocate(0x%llx) clamped count %u -> clean return\n",
+                                static_cast<unsigned long long>(table), count);
+                    std::fflush(stdout);
+                    c->pc = c->x[30];
+                    return;
+                }
+            }
+            static totk::recompiler::RecompiledFunc s_orig_reloc =
+                totk::recompiler::lookup_recompiled_func(0x710c081aa0ULL);
+            if (s_orig_reloc && table >= 0x7000000000ULL) {
+                s_orig_reloc(c);
+            } else {
+                c->pc = c->x[30];
+            }
+        });
+    };
+    hook_reloc_table(0x710c081aa0ULL);
+    hook_reloc_table(0x7106bb7bb0ULL);
+
+    // Guard f_71050e35c0 (instance initialized check)
+    totk::recompiler::register_recompiled_func(0x71050e35c0ULL, [](Arm64Context *c) {
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+        uint64_t p1 = *reinterpret_cast<uint64_t *>(c->x[0] + 0x28);
+        if (p1 < 0x7000000000ULL || p1 >= 0x7300000000ULL) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+        uint64_t p2 = *reinterpret_cast<uint64_t *>(p1 + 0x20);
+        if (p2 < 0x7000000000ULL || p2 >= 0x7300000000ULL) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+        c->x[0] = (*reinterpret_cast<uint8_t *>(p2 + 0x110) != 0) ? 1 : 0;
+        c->pc = c->x[30];
+    });
+
+    // Guard f_71050e35f0 (instance query)
+    totk::recompiler::register_recompiled_func(0x71050e35f0ULL, [](Arm64Context *c) {
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+        static totk::recompiler::RecompiledFunc s_orig =
+            totk::recompiler::lookup_recompiled_func(0x71050e35f0ULL);
+        if (s_orig) s_orig(c);
+        else c->pc = c->x[30];
     });
 
     // Guard f_710437bb60 against invalid object pointers

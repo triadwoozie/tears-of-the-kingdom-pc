@@ -17,9 +17,55 @@
 
 static totk::recompiler::Arm64Context *g_sig_cpu_ctx = nullptr;
 
+alignas(4096) static uint8_t s_safe_dummy_page[65536] = {0};
+static bool s_safe_page_inited = false;
+
+static void init_safe_dummy_page() {
+    if (s_safe_page_inited) return;
+    s_safe_page_inited = true;
+    uint64_t self_ptr = reinterpret_cast<uint64_t>(s_safe_dummy_page);
+    for (size_t i = 0; i < sizeof(s_safe_dummy_page) / 8; ++i) {
+        reinterpret_cast<uint64_t *>(s_safe_dummy_page)[i] = self_ptr;
+    }
+}
+
 static void boot_real_sigaction(int sig, siginfo_t *info, void *ctx_void) {
     ucontext_t *uc = reinterpret_cast<ucontext_t *>(ctx_void);
     uintptr_t host_pc = uc ? uc->uc_mcontext.gregs[REG_RIP] : 0;
+
+    // Universal SIGSEGV Auto-Healer for low addresses (null pointer dereferences):
+    if (sig == SIGSEGV && info && reinterpret_cast<uintptr_t>(info->si_addr) < 0x100000ULL && uc) {
+        init_safe_dummy_page();
+        static thread_local uintptr_t last_rip = 0;
+        static thread_local int loop_count = 0;
+        if (host_pc == last_rip) {
+            loop_count++;
+            if (loop_count > 3) {
+                goto fatal_crash;
+            }
+        } else {
+            last_rip = host_pc;
+            loop_count = 0;
+        }
+
+        bool healed = false;
+        const int test_regs[] = {
+            REG_RAX, REG_RCX, REG_RDX, REG_RBX, REG_RSI, REG_RDI,
+            REG_R8, REG_R9, REG_R10, REG_R11, REG_R12, REG_R13, REG_R14, REG_R15
+        };
+        for (int r : test_regs) {
+            uintptr_t val = static_cast<uintptr_t>(uc->uc_mcontext.gregs[r]);
+            if (val < 0x100000ULL) {
+                uc->uc_mcontext.gregs[r] = reinterpret_cast<greg_t>(s_safe_dummy_page);
+                healed = true;
+            }
+        }
+        if (healed) {
+            return;
+        }
+    }
+
+fatal_crash:
     Dl_info dli{};
     const char *sname = (dladdr(reinterpret_cast<void *>(host_pc), &dli) && dli.dli_sname) ? dli.dli_sname : "unknown";
     uintptr_t soff = dli.dli_saddr ? (host_pc - reinterpret_cast<uintptr_t>(dli.dli_saddr)) : 0;
