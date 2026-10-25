@@ -42,6 +42,7 @@
   - Implemented SARC hash function (`sarc_hash`) with hash lookup multiplier `0x65` for $O(1)$ file retrieval without disk seeks.
   - Added synthetic SARC archive generator (`SarcArchive::create_archive`) for packaging and testing.
   - Wired transparent nested RomFS resolution in `FileSystemHLE::read_romfs_file` supporting `romfs:/Pack/*.pack/*` and `.sarc/*` with transparent nested `.zs` decompression.
+  - Added zero-copy partial file slice querying and streaming (`read_sarc_file_slice`) to avoid full-buffer copies when querying resource headers.
   - Added unit test `test_sarc_archive_indexing` in `tests/test_fs_ipc.cpp`. All 10 CTests pass 100%.
 
 - **Task PC2-7: NVN Queue Submission & Frame Synchronization**
