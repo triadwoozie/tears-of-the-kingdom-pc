@@ -43,3 +43,8 @@
   - Added synthetic SARC archive generator (`SarcArchive::create_archive`) for packaging and testing.
   - Wired transparent nested RomFS resolution in `FileSystemHLE::read_romfs_file` supporting `romfs:/Pack/*.pack/*` and `.sarc/*` with transparent nested `.zs` decompression.
   - Added unit test `test_sarc_archive_indexing` in `tests/test_fs_ipc.cpp`. All 10 CTests pass 100%.
+
+- **Task PC2-7: NVN Queue Submission & Frame Synchronization**
+  - Implemented `queue_submit_commands`, `queue_finish`, and `queue_flush` in `VulkanBackend` and tracked recording state in `CommandRecordingState`.
+  - Wired HLE entrypoints `nvnQueueSubmitCommands`, `nvnQueueFinish`, and `nvnQueueFlush` to `VulkanBackend`.
+  - Added unit test `test_queue_submission_and_synchronization` in `tests/test_nvn_vulkan.cpp`. All 10 CTests pass 100%.
