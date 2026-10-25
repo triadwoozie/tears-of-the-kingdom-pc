@@ -170,15 +170,18 @@ function(add_totk_test TEST_NAME TEST_SRC)
     target_include_directories(${TEST_NAME} PRIVATE
         src/
         src/runtime/
+        ${IMGUI_DIR}
         ${SIMDE_INCLUDE_DIR}
         ${VOLK_INCLUDE_DIR}
         ${VULKAN_HEADERS_INCLUDE_DIR}
         ${VMA_INCLUDE_DIR}
     )
     target_link_libraries(${TEST_NAME} PRIVATE
+        totk_recomp_ui
         totk_recomp_runtime
         totk_recomp_recompiler
         totk_recomp_graphics
+        imgui
         volk
         SDL3::SDL3
     )
@@ -197,3 +200,4 @@ add_totk_test(test_audio_hid tests/test_audio_hid.cpp)
 add_totk_test(test_module_loader tests/test_module_loader.cpp)
 add_totk_test(test_fs_ipc tests/test_fs_ipc.cpp)
 add_totk_test(test_astc_decoder tests/test_astc_decoder.cpp)
+add_totk_test(test_ui_config tests/test_ui_config.cpp)

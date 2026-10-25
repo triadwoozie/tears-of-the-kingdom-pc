@@ -15,8 +15,9 @@ void Overlay::render(double frame_time_ms, double gpu_time_ms) {
     history_offset_ = (history_offset_ + 1) % 120;
 
     ImGuiIO &io = ImGui::GetIO();
+    (void)io;
     ImGui::SetNextWindowPos(ImVec2(16.0f, 16.0f), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(340.0f, 240.0f), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(340.0f, 260.0f), ImGuiCond_Always);
 
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
                             ImGuiWindowFlags_AlwaysAutoResize |
@@ -34,8 +35,12 @@ void Overlay::render(double frame_time_ms, double gpu_time_ms) {
         float fps = (frame_time_ms > 0.0) ? static_cast<float>(1000.0 / frame_time_ms) : 0.0f;
         ImGui::Text("FPS: %.1f (%.2f ms)", fps, frame_time_ms);
         ImGui::Text("GPU Time: %.2f ms", gpu_time_ms);
+        ImGui::Text("Active Horizon Threads: %d", guest_thread_count_);
+        if (!last_boot_symbol_.empty()) {
+            ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "PC: %s", last_boot_symbol_.c_str());
+        }
 
-        ImGui::PlotLines("##FrameGraph", frame_history_, 120, history_offset_, "Frame Time (ms)", 0.0f, 33.3f, ImVec2(310, 60));
+        ImGui::PlotLines("##FrameGraph", frame_history_, 120, history_offset_, "Frame Time (ms)", 0.0f, 33.3f, ImVec2(310, 50));
 
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(0.6f, 0.7f, 0.8f, 1.0f), "Quick Controls:");
