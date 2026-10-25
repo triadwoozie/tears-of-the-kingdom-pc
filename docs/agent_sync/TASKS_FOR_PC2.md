@@ -1,44 +1,60 @@
 # Tasks for PC-2 (Secondary Graphics, Asset Pipeline & UI Node)
 
-Welcome PC-2! The primary node (PC-1) is actively driving `--boot-real` past module loading, guest threading (24 active Horizon threads), SEAD allocator trees, and material descriptors into `gsys::NVNMgr`.
+Welcome PC-2! The primary node (PC-1) is actively driving `--boot-real` past module loading, guest threading (23 active Horizon threads), SEAD allocator trees, format block descriptors, and material descriptors into `gsys::NVNMgr`.
 
-Please pick up and implement the following self-contained tasks in order. All tasks must build cleanly with `ninja -C build -j 2` and pass `ctest --test-dir build --output-on-failure`.
+Please pick up and implement the following tasks in order. All tasks must build cleanly with `ninja -C build -j 2` and pass `ctest --test-dir build --output-on-failure`.
 
 ---
 
-## Task PC2-1: Vulkan 1.3 Command Buffer Recording & Queue Presentation
+## Reference Repositories for Consultation
+PC-2 can consult the following reference repositories located in `reference_repos/` for exact Switch / Zelda engine patterns:
+- **`reference_repos/totk-mobile`**: iOS/macOS static recompilation port of TotK v1.2.1 / v1.4.3. Excellent reference for NVN -> Metal / Vulkan mappings, resource managers, SEAD game framework structures, and RomFS loading.
+- **`reference_repos/SavageWindRecomp`**: Open-source static recompilation runtime for Zelda games. Key reference for Horizon kernel syscall emulation, audio renderer, and thread scheduling.
+- **`reference_repos/SwitchRecomp`**: SwitchRecomp runtime and specifications (`specs/SPEC-*.md`). Byte-exact LP64 ABIs for `nn::hid`, `nn::fs`, `nn::os`, `nn::vi`, and `nvn`.
+- **`reference_repos/LASRecomp`**: Recompiler dispatch table architecture and static lifter chunk organization.
+- **`reference_repos/botw`**: Breath of the Wild decompilation project (`botw64`). Perfect structural reference for `gsys::*`, `agl::*`, and `sead::*` class layouts.
+
+---
+
+## Task PC2-1: Vulkan 1.3 Command Buffer Recording & Queue Presentation [COMPLETED by PC-2]
 - **Target Files:** `src/graphics/nvn_vk.cpp`, `src/graphics/nvn_vk.h`, `src/graphics/hle_nvn_gen.cpp`
-- **Scope:**
-  - Implement full Vulkan 1.3 command recording in `nvnCommandBufferDrawArrays`, `nvnCommandBufferDrawElements`, `nvnCommandBufferBindVertexBuffer`, `nvnCommandBufferBindUniformBuffer`.
-  - Implement uniform buffer ringbuffer updating via `nvnCommandBufferUpdateUniformBuffer` using host-visible staging memory or push descriptors.
-  - Implement `nvnCommandBufferSetViewport`, `nvnCommandBufferSetScissor`, and dynamic render pass color clear (`nvnCommandBufferClearColor`).
-  - Wire `nvnQueuePresentTexture` to acquire the next swapchain image, transition layout from `VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL` to `VK_IMAGE_LAYOUT_PRESENT_SRC_KHR`, submit command buffer, and present via `vkQueuePresentKHR`.
-  - Maintain compatibility with `tests/test_nvn_vulkan.cpp`.
+- **Scope:** Completed in commit `f5d9e67`.
 
 ---
 
-## Task PC2-2: Fast CPU/Compute ASTC Texture Decompression Helper
+## Task PC2-2: Fast CPU/Compute ASTC Texture Decompression Helper [COMPLETED by PC-2]
 - **Target Files:** `src/graphics/astc_decoder.cpp`, `src/graphics/astc_decoder.h`, `tests/test_astc_decoder.cpp`
-- **Scope:**
-  - Desktop GPUs (AMD, Nvidia GeForce) lack hardware ASTC texture decoding present on Tegra X1 / Apple Silicon.
-  - Implement an ASTC block decoder supporting 4x4, 5x5, 6x6, 8x8, 10x10, and 12x12 footprint blocks, decoding uncompressed ASTC LDR blocks into standard RGBA8 (`VK_FORMAT_R8G8B8A8_UNORM`).
-  - Integrate SIMDe NEON/SSE vectors for parallel pixel reconstruction.
-  - Add unit test `tests/test_astc_decoder.cpp` testing synthetic 4x4 and 8x8 color blocks.
+- **Scope:** Completed in commit `b8e0bf1`.
 
 ---
 
-## Task PC2-3: Dear ImGui Studio Diagnostics & Config Serialization
+## Task PC2-3: Dear ImGui Studio Diagnostics & Config Serialization [COMPLETED by PC-2]
 - **Target Files:** `src/ui/studio.cpp`, `src/ui/studio.h`, `src/ui/overlay.cpp`, `tests/test_ui_config.cpp`
-- **Scope:**
-  - Implement the **Boot Trace & Symbol Inspector** tab in Dear ImGui Studio displaying active guest threads (`ActiveGuestThread`), program counters, and recent trace log ringbuffer.
-  - Implement complete serialization/deserialization for `local/config.toml` (resolution scaling, Vulkan device index, VSync mode, audio volume, controller keybindings).
-  - Add unit test `tests/test_ui_config.cpp` verifying config saving, loading, and fallback defaults.
+- **Scope:** Completed in commit `ad44e7d`.
 
 ---
 
-## Task PC2-4: Transparent Zstandard (.zs) Decompression Helpers
+## Task PC2-4: Transparent Zstandard (.zs) Decompression Helpers [ACTIVE on PC-2]
 - **Target Files:** `src/runtime/filesystem_hle.cpp`, `src/runtime/filesystem_hle.h`, `tests/test_fs_ipc.cpp`
 - **Scope:**
   - Tears of the Kingdom heavily compresses RomFS archives using Zstandard with custom dictionaries (`ZsDic.pack.zs`).
   - Implement `ZstdDecompressor` class wrapping standard Zstd frame decompression and dictionary initialization.
   - Ensure `RomFS` virtual mount can transparently decompress `.zs` files upon `nn::fs::OpenFile` / `ReadFile`.
+
+---
+
+## Task PC2-5: Dynamic NVN Render Target Allocation & Swapchain Blit
+- **Target Files:** `src/graphics/nvn_vk.cpp`, `src/graphics/nvn_vk.h`
+- **Scope:**
+  - Implement dynamic frame buffer attachment creation (`VkImageView`, `VkFramebuffer`) in `VulkanBackend` when `nvnCommandBufferSetRenderTargets` is called with multiple color textures and depth/stencil textures.
+  - Implement swapchain blit / resolve from the offscreen HDR render target (`VK_FORMAT_R16G16B16A16_SFLOAT` or `VK_FORMAT_A2B10G10R10_UNORM_PACK32`) to the swapchain present image (`VK_FORMAT_B8G8R8A8_UNORM`) during `nvnQueuePresentTexture`.
+  - Add unit test in `tests/test_nvn_vulkan.cpp`.
+
+---
+
+## Task PC2-6: Fast RomFS SARC / Pack File Indexer
+- **Target Files:** `src/runtime/filesystem_hle.cpp`, `src/runtime/filesystem_hle.h`
+- **Scope:**
+  - In TotK, assets are packed into SARC archives (`.pack`, `.sarc`, `.byml`).
+  - Implement SARC table of contents parser and hash lookup helper (`SarcArchive`) to quickly resolve sub-files without disk seeks.
+  - Add unit test in `tests/test_fs_ipc.cpp`.
