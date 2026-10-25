@@ -796,6 +796,33 @@ void register_sead_hlr_hooks() {
         c->pc = c->x[30];
     });
 
+    static totk::recompiler::RecompiledFunc s_orig_71049b9afc =
+        totk::recompiler::lookup_recompiled_func(0x71049b9afcULL);
+    totk::recompiler::register_recompiled_func(0x71049b9afcULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = 0x7000000000ULL;
+        constexpr uint64_t guest_limit = 0x7300000000ULL;
+        if (c->x[0] < guest_base || c->x[0] >= guest_limit) {
+            c->pc = c->x[30];
+            return;
+        }
+        if (c->x[0] > guest_limit - 0x320) {
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint64_t *node_slot = reinterpret_cast<uint64_t *>(c->x[0] + 0x318);
+        const uint64_t node = *node_slot;
+        if (node != 0 && (node < guest_base || node >= guest_limit - 0x20)) {
+            *node_slot = 0;
+        }
+        if (c->x[1] < guest_base || c->x[1] >= guest_limit) {
+            c->x[1] = hlr_bump_alloc(0x100, 0x10);
+        }
+
+        if (s_orig_71049b9afc) s_orig_71049b9afc(c);
+        else c->pc = c->x[30];
+    });
+
     static totk::recompiler::RecompiledFunc s_orig_71049b7c88 =
         totk::recompiler::lookup_recompiled_func(0x71049b7c88ULL);
     totk::recompiler::register_recompiled_func(0x71049b7c88ULL, [](Arm64Context *c) {
