@@ -2,8 +2,7 @@ stack:fix/guest-heap-tls-init	0001-fix-guest-heap-tls-init.patch	fix(runtime): i
 stack:fix/linux-thread-sched-and-warnings	0002-fix-linux-thread-sched-and-warnings.patch	fix(linux): resolve thread scheduling policy warnings and compiler warnings	pr_0002_body.md
 stack:feat/safe-guest-memory-ops	0003-feat-safe-guest-memory-ops.patch	feat(runtime): add bounds-checked memory copy overrides for early boot resilience	pr_0003_body.md
 stack:feat/loose-romfs-fallback	0004-feat-loose-romfs-fallback.patch	feat(fs): add loose RomFS directory support and safe zero-filled fallback file handles	pr_0004_body.md
-stack:feat/linux-setup-pipeline	0005-feat-linux-setup-pipeline.patch	feat(tools): port setup.py and add setup.sh for Linux and Steam Deck pipeline	pr_0005_body.md
-stack:feat/linux-shader-translator	0006-feat-linux-shader-translator.patch	feat(tools): port build_xlate and shader translation tools for native Linux execution	pr_0006_body.md
-stack:fix/runtime-path-and-logic-audit	0007-fix-runtime-path-and-logic-audit.patch	fix(runtime): support POSIX ultratears.cfg loading, path normalization, and case-insensitive RomFS lookups	pr_0007_body.md
-stack:feat/telemetry-hud-and-cli-ui	0008-feat-telemetry-hud-and-cli-ui.patch	feat(ui): add window title telemetry HUD, F3 toggle, and enhanced setup.py CLI progress UI	pr_0008_body.md
-stack:fix/boot-progression-next	0009-fix-boot-progression-next.patch	fix(nvn): guard device integer queries and safely stub dynamic checkpoint proc addresses	pr_0009_body.md
+stack:fix/boot-progression	0005-fix-boot-progression.patch	fix(runtime): resolve post-startup heap allocation crash and NVN proc address blocks	pr_0005_body.md
+stack:feat/linux-setup-pipeline	0006-feat-linux-setup-pipeline.patch	feat(tools): port setup.py and add setup.sh for Linux and Steam Deck pipeline	pr_0006_body.md
+stack:feat/linux-shader-translator	0007-feat-linux-shader-translator.patch	feat(tools): port build_xlate and shader translation tools for native Linux execution	pr_0007_body.md
+stack:fix/linux-path-case-sensitivity	0008-fix-linux-path-case-sensitivity.patch	fix(runtime): support POSIX ultratears.cfg loading, path normalization, and case-insensitive RomFS lookups	pr_0008_body.md

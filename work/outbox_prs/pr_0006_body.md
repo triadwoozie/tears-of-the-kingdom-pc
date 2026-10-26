@@ -1,15 +1,18 @@
 ### Summary of Changes
 
-This pull request ports `tools/build_xlate.py` and the shader translation utility toolset (`run_ryujinx_xlate.py`, `run_limited.py`, `run_eden_xlate.py`, `compare_spirv_opt.py`, and `validate_spirv.py`) for native execution on Linux.
+This pull request adds end-to-end Linux and Steam Deck / SteamOS builder pipeline support to `tools/setup.py` and introduces `setup.sh`.
 
-#### 1. Native Linux Build for `ultrs-shaders` (`tools/build_xlate.py`)
-- **Problem**: `build_xlate.py` hardcoded `-r win-x64` and output filename `ultrs-shaders.exe`, preventing the Ryujinx Maxwell-to-SPIR-V translator from building natively on Linux and causing Step 5 of setup to fail.
-- **Fix**: Dynamically selected the Runtime Identifier (`linux-x64` on Linux, `osx-arm64`/`osx-x64` on macOS, `win-x64` on Windows), named the executable `ultrs-shaders` on POSIX systems, and marked it executable (`0o755`).
+#### 1. Linux & Steam Deck Builder Support (`tools/setup.py` & `tools/toolchain.py`)
+- **Problem**: `tools/setup.py` assumed a Windows environment, requiring Windows-only binaries in `deps/clang64/bin/*.exe` and `deps/python/python.exe`, and attempting to query/download Windows MSYS2 release archives from GitHub on missing tools.
+- **Fix**:
+  - Dynamically resolved binary names (`UltraTears` on Linux, `UltraTears.exe` on Windows; `ultrs-shaders` on Linux, `ultrs-shaders.exe` on Windows).
+  - On Linux (`sys.platform.startswith('linux')`), bypassed the Windows MSYS2 download logic and verified host toolchain binaries (`clang`, `clang++`, `ninja`) and Python packages (`lz4`, `capstone`, `unicorn`), bootstrapping missing packages via `pip install` when needed.
+  - Used `sys.executable` during checkout builds on Linux rather than expecting hardcoded `deps/python/python.exe`.
+  - Replaced Windows-only process priority flags with POSIX `os.nice(10)`.
 
-#### 2. Cross-Platform Process Pinned Execution & Priority Control
-- **Problem**: `tools/run_ryujinx_xlate.py`, `tools/run_limited.py`, `tools/run_eden_xlate.py`, `tools/compare_spirv_opt.py`, and `tools/validate_spirv.py` unconditionally invoked `ctypes.windll.kernel32.SetProcessAffinityMask` and Windows creation flags (`CREATE_SUSPENDED | BELOW_NORMAL_PRIORITY_CLASS`), causing fatal `AttributeError` or `ValueError` crashes on Linux.
-- **Fix**: Added platform detection; on POSIX systems, applied process priority adjustments via `os.nice(10)` and thread/core pinning via `os.sched_setaffinity` in process `preexec_fn` hooks, while preserving the Win32 API implementation when running under Windows.
+#### 2. Root Launcher Script (`setup.sh`)
+- Introduced an executable root `setup.sh` mirroring `setup.bat`, enabling one-click or drag-and-drop terminal execution on Linux desktop and Steam Deck environments.
 
 ### Verification
-- Tested with Python 3.14 on Linux (`x86_64`).
-- Validated patch application with `--whitespace=error-all`.
+- Tested syntax and dependencies under Python 3.14 / Linux x86_64.
+- Verified patch application with `--whitespace=error-all`.

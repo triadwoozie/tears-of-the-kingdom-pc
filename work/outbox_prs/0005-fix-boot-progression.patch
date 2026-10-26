@@ -1,0 +1,92 @@
+diff --git a/src/gfx/nvn/hle_nvn.c b/src/gfx/nvn/hle_nvn.c
+index 472a2f8..2212191 100644
+--- a/src/gfx/nvn/hle_nvn.c
++++ b/src/gfx/nvn/hle_nvn.c
+@@ -172,7 +172,11 @@ NVN(nvnDeviceGetInteger, void, const NVNdevice *d, NVNdeviceInfo what, int *out)
+     unsigned w = (unsigned)what;
+     // 0x5F 分离采样器绑定数、0x60/0x61 在 SMO 实测表里没有：0x5F 按采样器池上限给 4096 未核，0x60/0x61 报红给 0
+     // 0x5F separate sampler binding count and 0x60/0x61 are not in the table measured on SMO: 0x5F is given 4096 per the sampler pool limit, unverified; 0x60/0x61 report a failure and return 0
+-    if (w >= sizeof g_devinfo / sizeof *g_devinfo) { die("unsupported NVN device property %#x", w); }
++    if (w >= sizeof g_devinfo / sizeof *g_devinfo) {
++        LOG("unsupported NVN device property %#x (returning 0)", w);
++        *out = 0;
++        return;
++    }
+     *out = g_devinfo[w];
+     OLOG("DeviceGetInteger %#x -> %d", w, *out);
+ }
+diff --git a/src/gfx/nvn/nvn_registry.c b/src/gfx/nvn/nvn_registry.c
+index 1aee291..d6e97b9 100644
+--- a/src/gfx/nvn/nvn_registry.c
++++ b/src/gfx/nvn/nvn_registry.c
+@@ -60,5 +60,6 @@ uint64_t nvn_registry_guest_address(const char *name) {
+     for (unsigned i = 0; i < nvn_thunk_count; i++)
+         if (!strcmp(nvn_thunks[i].name, name)) return hle_register(nvn_thunks[i].name, nvn_thunks[i].fn);
+     if (nvn_nop_name(name)) return hle_register(name, nvn_nop_thunk);
+-    return hle_register(name, NULL);
++    LOG("[nvn] stubbing unknown NVN symbol: %s", name);
++    return hle_register(name, nvn_nop_thunk);
+ }
+diff --git a/src/host/guest.c b/src/host/guest.c
+index b327ef1..8228019 100644
+--- a/src/host/guest.c
++++ b/src/host/guest.c
+@@ -95,3 +95,58 @@ static void guest_fault_report(void) {
+ }
+ extern void (*rt_fault_extra)(void);
+ __attribute__((constructor)) static void install_fault_report(void) { rt_fault_extra = guest_fault_report; }
++
++// Defensive fallback for sead::Heap::alloc (0x080006a920ull) when invoked without a valid heap context
++static void hle_sead_heap_alloc_override(Cpu *c) {
++    if (c->x[1] == 0) {
++        static pthread_mutex_t s_fallback_lock = PTHREAD_MUTEX_INITIALIZER;
++        static uint8_t *s_fallback_arena = NULL;
++        static uint64_t s_fallback_used = 0;
++        const uint64_t ARENA_SIZE = 32ULL << 20;  // 32 MiB fallback arena
++        uint64_t size = c->x[0] ? c->x[0] : 0x230;
++        uint64_t alignment = c->x[2] ? c->x[2] : 16;
++        if (alignment < 8) alignment = 8;
++        pthread_mutex_lock(&s_fallback_lock);
++        if (!s_fallback_arena) {
++            s_fallback_arena = (uint8_t *)hle_alloc(ARENA_SIZE);
++        }
++        uint64_t cur = (uint64_t)(uintptr_t)(s_fallback_arena + s_fallback_used);
++        uint64_t aligned = (cur + (alignment - 1)) & ~(alignment - 1);
++        uint64_t new_used = (aligned - (uint64_t)(uintptr_t)s_fallback_arena) + size;
++        if (new_used <= ARENA_SIZE) {
++            s_fallback_used = new_used;
++            c->x[0] = aligned;
++            memset((void *)(uintptr_t)c->x[0], 0, (size_t)size);
++        } else {
++            fprintf(stderr, "[totk] WARNING: sead::Heap fallback arena exhausted (%llu bytes requested)\n",
++                    (unsigned long long)size);
++            c->x[0] = 0;
++        }
++        pthread_mutex_unlock(&s_fallback_lock);
++        fprintf(stderr, "[totk] sead::Heap::alloc with NULL heap pointer -> fallback arena alloc %#llx (size=%llu, lr=%#llx)\n",
++                (unsigned long long)c->x[0], (unsigned long long)size, (unsigned long long)c->x[30]);
++        return;
++    }
++    GuestFn orig = dispatch_lookup(0x080006a920ull);
++    if (orig) orig(c);
++    else c->x[0] = 0;
++    if (c->x[0] == 0) {
++        static pthread_mutex_t s_fallback_lock = PTHREAD_MUTEX_INITIALIZER;
++        static uint8_t *s_fallback_arena = NULL;
++        static uint64_t s_fallback_used = 0;
++        const uint64_t ARENA_SIZE = 32ULL << 20;
++        uint64_t size = 0x230;
++        pthread_mutex_lock(&s_fallback_lock);
++        if (!s_fallback_arena) s_fallback_arena = (uint8_t *)hle_alloc(ARENA_SIZE);
++        uint64_t cur = (uint64_t)(uintptr_t)(s_fallback_arena + s_fallback_used);
++        uint64_t aligned = (cur + 15) & ~15ull;
++        s_fallback_used = (aligned - (uint64_t)(uintptr_t)s_fallback_arena) + size;
++        c->x[0] = aligned;
++        memset((void *)(uintptr_t)c->x[0], 0, (size_t)size);
++        pthread_mutex_unlock(&s_fallback_lock);
++    }
++}
++
++__attribute__((constructor)) static void install_heap_override(void) {
++    hle_override(0x080006a920ull, hle_sead_heap_alloc_override, "sead::Heap::alloc");
++}

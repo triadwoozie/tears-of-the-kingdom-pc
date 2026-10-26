@@ -1,17 +1,15 @@
 ### Summary of Changes
 
-This pull request addresses Linux path sensitivity and configuration discovery issues in `src/host/boot.c` and `src/host/fs.c`.
+This pull request ports `tools/build_xlate.py` and the shader translation utility toolset (`run_ryujinx_xlate.py`, `run_limited.py`, `run_eden_xlate.py`, `compare_spirv_opt.py`, and `validate_spirv.py`) for native execution on Linux.
 
-#### 1. POSIX `ultratears.cfg` Loading & Working Directory Configuration (`src/host/boot.c`)
-- **Problem**: `default_exefs()` previously enclosed the entire configuration file discovery and `ultratears.cfg` parser in `#ifdef _WIN32`. On Linux, the executable always defaulted to `data/exefs` without honoring custom `ultratears.cfg` settings, and never adjusted the working directory via `chdir()`.
-- **Fix**: Added POSIX executable directory resolution via `readlink("/proc/self/exe")`, followed by POSIX directory change via `chdir(path)`, enabling proper `ultratears.cfg` parsing, custom RomFS/Shader paths, and save directory environment variable propagation on Linux and Steam Deck.
+#### 1. Native Linux Build for `ultrs-shaders` (`tools/build_xlate.py`)
+- **Problem**: `build_xlate.py` hardcoded `-r win-x64` and output filename `ultrs-shaders.exe`, preventing the Ryujinx Maxwell-to-SPIR-V translator from building natively on Linux and causing Step 5 of setup to fail.
+- **Fix**: Dynamically selected the Runtime Identifier (`linux-x64` on Linux, `osx-arm64`/`osx-x64` on macOS, `win-x64` on Windows), named the executable `ultrs-shaders` on POSIX systems, and marked it executable (`0o755`).
 
-#### 2. Path Separator Normalization & Case-Insensitive RomFS Resolution (`src/host/fs.c`)
-- **Problem**: RomFS lookup rejected paths containing backslashes (`\`) via `strchr(path, '\\')`, failing when guest components or configuration files passed mixed slash styles. Furthermore, Linux file systems are strictly case-sensitive, causing lookups to fail on subtle case discrepancies.
-- **Fix**:
-  - In `rom_path()`, normalized all backslashes to forward slashes before parsing directory segments.
-  - In `file_index()`, added a secondary case-insensitive lookup (`strcasecmp`) if exact binary search fails, ensuring reliable file opening on case-sensitive Linux filesystems.
+#### 2. Cross-Platform Process Pinned Execution & Priority Control
+- **Problem**: `tools/run_ryujinx_xlate.py`, `tools/run_limited.py`, `tools/run_eden_xlate.py`, `tools/compare_spirv_opt.py`, and `tools/validate_spirv.py` unconditionally invoked `ctypes.windll.kernel32.SetProcessAffinityMask` and Windows creation flags (`CREATE_SUSPENDED | BELOW_NORMAL_PRIORITY_CLASS`), causing fatal `AttributeError` or `ValueError` crashes on Linux.
+- **Fix**: Added platform detection; on POSIX systems, applied process priority adjustments via `os.nice(10)` and thread/core pinning via `os.sched_setaffinity` in process `preexec_fn` hooks, while preserving the Win32 API implementation when running under Windows.
 
 ### Verification
-- Compiled with Clang 18 on Linux (`x86_64`) under `-Wall -Wextra` with zero warnings.
-- Verified patch application with `--whitespace=error-all`.
+- Tested with Python 3.14 on Linux (`x86_64`).
+- Validated patch application with `--whitespace=error-all`.
