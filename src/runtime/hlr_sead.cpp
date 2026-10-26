@@ -231,6 +231,25 @@ void register_sead_hlr_hooks() {
         c->pc = c->x[30];
     });
 
+    totk::recompiler::register_recompiled_func(0x7104bf6268ULL, [](Arm64Context *c) {
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   c->x[0], 0x120)) {
+            static uint32_t s_zero[4] = {0, 0, 0, 0};
+            c->x[0] = reinterpret_cast<uint64_t>(&s_zero);
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint8_t flag = 0;
+        std::memcpy(&flag, reinterpret_cast<const void *>(c->x[0] + 0x11b), 1);
+        if (flag & 1) {
+            c->x[0] = c->x[0] + 0xb8;
+        } else {
+            c->x[0] = c->x[0] + 0xb8;
+        }
+        c->pc = c->x[30];
+    });
+
     totk::recompiler::register_recompiled_func(0x7104bfed4cULL, [](Arm64Context *c) {
         if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
                                    c->x[0], 0x61)) {
