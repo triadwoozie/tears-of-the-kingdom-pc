@@ -41,3 +41,12 @@
   - Audio renderer helper bypass cluster: `0x710c1f6b50`, `0x710c1f61a0`, `0x710c1f6c10`, `0x710c1f6c70`, `0x710c1f5f60`, `0x710c1f69d0`, `0x710c1f6a30`, `0x710c1f6a90`, `0x710c1f6ce0`.
   - SEAD container validator cluster: `0x71049b7e80`, `0x71049c8ecc`, `0x71049ba158`, `0x7104d23fe4`, `0x7104bfed4c`, `0x7104bfedb0`.
 - **Status:** All 10 CTests passing 100%. MainThread successfully reached top-level game logic loops.
+
+### Iteration 183 - MainThread Container Traversal Identified
+- **PC-2 integration:** `origin/pc2-worker` is already an ancestor of `main`; no rebase was needed. The fetched PC-2 status reports no active relay task.
+- **Build/tests:** `ninja -C build -j 2` completed with no work to do; all 10 CTests passed with two jobs.
+- **Boot:** `--boot-real` ran until the 25-second timeout (expected exit 124). The watchdog reported 369,756,812 calls at about 21.9 million calls/s and 11 active Horizon threads.
+- **MainThread:** The final trace remains at `PC=0x7104af51a4`, `LR=0x7104bfe1b4`; the stack includes `0x7104be5830`. Workers continue running or sleeping in the existing SDK worker routines.
+- **Local static analysis:** `tools/local_loop_scanner.py` found that `f_7104af51a4` follows the pointer at `+0x18` until it is null. This is a linked-list traversal, not evidence of a vsync, display, focus, or event wait. Both `0x7104bfe1b4` and `0x7104be5830` are return addresses in their callers, not function entries.
+- **Hook decision:** No speculative bypass hook was added; forcing a return could skip required container processing. The default `work/symbols.tsv` path is absent on this checkout; the scanner can use the already-fetched local `origin/symbol-table` object as a fallback.
+- **Graphics/archive handoff:** No new graphics, shader, or archive requirement was established by this trace, so no new PC-2 task was filed.
