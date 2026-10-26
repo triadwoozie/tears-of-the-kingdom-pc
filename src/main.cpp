@@ -113,6 +113,7 @@ fatal_crash:
 #include "runtime/memory_manager.h"
 #include "runtime/module_loader.h"
 #include "runtime/services_hle.h"
+#include "runtime/runtime_config.h"
 #include "ui/imgui_style.h"
 #include "ui/overlay.h"
 #include "ui/studio.h"
@@ -379,7 +380,23 @@ static int run_boot_real(const std::string &entry_symbol) {
 
     services.initialize();
     fs_hle.initialize();
+    if (fs::exists("work/romfs/ZsDic.pack.zs")) {
+        fs_hle.load_romfs_dictionary();
+    }
     audio.initialize(48000, 2);
+
+    totk::graphics::VulkanBackend headless_backend;
+    if (totk::g_headless_mode) {
+        totk::graphics::GraphicsConfig graphics_config;
+        graphics_config.window_width = 1600;
+        graphics_config.window_height = 900;
+        graphics_config.headless = true;
+        if (!headless_backend.initialize(nullptr, graphics_config)) {
+            std::fprintf(stderr, "[Boot-Real Error] Failed to initialize headless Vulkan backend.\n");
+            return 1;
+        }
+    }
+
     totk::recompiler::init_dispatch_table();
     totk::recompiler::load_symbols_tsv("work/symbols.tsv");
 
@@ -853,12 +870,9 @@ static int run_boot_real(const std::string &entry_symbol) {
     // Hook nn::vi::GetDisplayVsyncEvent (0x710c4504b0)
     totk::recompiler::register_recompiled_func(0x710c4504b0ULL, [](totk::recompiler::Arm64Context *c) {
         std::printf("  [HLE nn::vi::GetDisplayVsyncEvent] Called event=%p\n", reinterpret_cast<void *>(c->x[0]));
-        uint32_t *ev = reinterpret_cast<uint32_t *>(c->x[0]);
-        if (ev) {
-            ev[0] = 1;          // state = 1 (Initialized)
-            ev[1] = 0x01010101; // auto_clear=1, readable_managed=1, writable_managed=1
-            ev[2] = 0x20001;    // readable handle
-            ev[3] = 0x20002;    // writable handle
+        if (!totk::runtime::initialize_display_vsync_event(c->x[0])) {
+            std::fprintf(stderr, "[HLE nn::vi::GetDisplayVsyncEvent] Invalid guest event address 0x%llx\n",
+                         static_cast<unsigned long long>(c->x[0]));
         }
         c->x[0] = 0;
     });
@@ -1387,6 +1401,8 @@ int main(int argc, char *argv[]) {
             boot_trace_mode = true;
         } else if (std::strcmp(argv[i], "--boot-real") == 0) {
             boot_real_mode = true;
+        } else if (std::strcmp(argv[i], "--headless") == 0) {
+            totk::g_headless_mode = true;
         } else if (std::strcmp(argv[i], "--entry") == 0 && i + 1 < argc) {
             custom_entry = argv[++i];
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
@@ -1395,6 +1411,7 @@ int main(int argc, char *argv[]) {
             std::printf("  --smoke-test       Run headless subsystem verification and exit\n");
             std::printf("  --boot-trace       Trace guest module loading, relocations, and simulated boot sequence\n");
             std::printf("  --boot-real        Load build/libtotk_game.so and execute real recompiled guest code\n");
+            std::printf("  --headless         Run real boot with an offscreen Vulkan target and no window\n");
             std::printf("  --entry <sym/hex>  Specify custom guest entrypoint (e.g. nnMain, nninitStartup, 0x7100000000)\n");
             std::printf("  --help, -h         Display this help message\n");
             return 0;
@@ -1414,7 +1431,7 @@ int main(int argc, char *argv[]) {
         return run_boot_trace();
     }
 
-    if (boot_real_mode) {
+    if (boot_real_mode || totk::g_headless_mode) {
         return run_boot_real(custom_entry);
     }
 

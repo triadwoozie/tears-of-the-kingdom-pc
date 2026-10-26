@@ -67,6 +67,7 @@ endif()
 
 # TotK Runtime Library
 add_library(totk_recomp_runtime STATIC
+    src/runtime/runtime_config.cpp
     src/runtime/paths.c
     src/runtime/memory_manager.cpp
     src/runtime/kernel_hle.cpp

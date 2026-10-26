@@ -1,5 +1,6 @@
 #include "game_framework_hle.h"
 #include "recompiler/dispatch.h"
+#include "runtime/memory_manager.h"
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -10,6 +11,7 @@ extern "C" uint64_t rt_ticks(void);
 namespace totk::runtime {
 
 static std::atomic<bool> s_hooks_registered{false};
+static std::atomic<uint64_t> s_display_vsync_event_address{0};
 
 // Synthetic non-blocking SystemEventType instance for VI vsync and notification events
 struct alignas(8) HleSystemEventType {
@@ -27,6 +29,33 @@ struct alignas(8) HleSystemEventType {
 
 [[maybe_unused]] static HleSystemEventType s_vsync_event;
 static HleSystemEventType s_notification_event;
+
+bool initialize_display_vsync_event(uint64_t guest_address) {
+    auto &memory = MemoryManager::instance();
+    if (guest_address < GUEST_MEMORY_BASE ||
+        guest_address > GUEST_MEMORY_LIMIT - 0x10 ||
+        !memory.commit(guest_address, 0x10)) {
+        return false;
+    }
+
+    auto *event_words = reinterpret_cast<uint32_t *>(guest_address);
+    event_words[0] = 1;
+    event_words[1] = 0x01010101;
+    event_words[2] = 0x20001;
+    event_words[3] = 0x20002;
+    s_display_vsync_event_address.store(guest_address, std::memory_order_release);
+    return true;
+}
+
+void signal_display_vsync_event() {
+    uint64_t address = s_display_vsync_event_address.load(std::memory_order_acquire);
+    auto &memory = MemoryManager::instance();
+    if (address >= GUEST_MEMORY_BASE &&
+        address <= GUEST_MEMORY_LIMIT - 0x10 &&
+        memory.commit(address, 0x10)) {
+        reinterpret_cast<uint32_t *>(address)[0] = 1;
+    }
+}
 
 void register_game_framework_hooks() {
     if (s_hooks_registered.exchange(true)) {

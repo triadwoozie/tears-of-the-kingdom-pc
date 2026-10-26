@@ -1,4 +1,5 @@
 #include "nvn_vk.h"
+#include "runtime/runtime_config.h"
 #include <SDL3/SDL_vulkan.h>
 #include <algorithm>
 #include <cstdio>
@@ -18,6 +19,7 @@ VulkanBackend::~VulkanBackend() {
 bool VulkanBackend::initialize(SDL_Window *window, const GraphicsConfig &config) {
     window_ = window;
     config_ = config;
+    config_.headless = config_.headless || totk::g_headless_mode;
 
     if (volkInitialize() != VK_SUCCESS) {
         std::fprintf(stderr, "[Vulkan] Failed to initialize Volk meta-loader.\n");
@@ -27,7 +29,8 @@ bool VulkanBackend::initialize(SDL_Window *window, const GraphicsConfig &config)
     if (!create_instance()) return false;
     volkLoadInstance(instance_);
 
-    if (!SDL_Vulkan_CreateSurface(window_, instance_, nullptr, &surface_)) {
+    if (!config_.headless && (!window_ ||
+        !SDL_Vulkan_CreateSurface(window_, instance_, nullptr, &surface_))) {
         std::fprintf(stderr, "[Vulkan] Failed to create window surface: %s\n", SDL_GetError());
         return false;
     }
@@ -37,16 +40,22 @@ bool VulkanBackend::initialize(SDL_Window *window, const GraphicsConfig &config)
     volkLoadDevice(device_);
 
     vkGetDeviceQueue(device_, queue_family_, 0, &queue_);
+    initialized_ = true;
+    s_active_backend = this;
 
-    if (!create_swapchain()) return false;
+    if (config_.headless) {
+        if (!create_headless_render_target(static_cast<uint32_t>(config_.window_width),
+                                           static_cast<uint32_t>(config_.window_height))) return false;
+    } else if (!create_swapchain()) {
+        return false;
+    }
     if (!create_render_pass()) return false;
     if (!create_framebuffers()) return false;
     if (!create_command_pool()) return false;
     if (!create_sync_objects()) return false;
 
-    initialized_ = true;
-    s_active_backend = this;
-    std::printf("[Vulkan] Initialized Vulkan 1.3 backend successfully.\n");
+    std::printf("[Vulkan] Initialized Vulkan 1.3 %s backend successfully.\n",
+                config_.headless ? "headless offscreen" : "desktop");
     return true;
 }
 
@@ -73,15 +82,25 @@ void VulkanBackend::shutdown() {
     vkDeviceWaitIdle(device_);
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        if (render_finished_semaphores_[i]) vkDestroySemaphore(device_, render_finished_semaphores_[i], nullptr);
-        if (image_available_semaphores_[i]) vkDestroySemaphore(device_, image_available_semaphores_[i], nullptr);
-        if (in_flight_fences_[i]) vkDestroyFence(device_, in_flight_fences_[i], nullptr);
+        if (i < render_finished_semaphores_.size() && render_finished_semaphores_[i]) {
+            vkDestroySemaphore(device_, render_finished_semaphores_[i], nullptr);
+        }
+        if (i < image_available_semaphores_.size() && image_available_semaphores_[i]) {
+            vkDestroySemaphore(device_, image_available_semaphores_[i], nullptr);
+        }
+        if (i < in_flight_fences_.size() && in_flight_fences_[i]) {
+            vkDestroyFence(device_, in_flight_fences_[i], nullptr);
+        }
     }
 
     if (command_pool_) vkDestroyCommandPool(device_, command_pool_, nullptr);
 
     for (auto fb : swapchain_framebuffers_) vkDestroyFramebuffer(device_, fb, nullptr);
     swapchain_framebuffers_.clear();
+    if (headless_color_framebuffer_) {
+        vkDestroyFramebuffer(device_, headless_color_framebuffer_, nullptr);
+        headless_color_framebuffer_ = VK_NULL_HANDLE;
+    }
 
     for (auto &[_, fb] : dynamic_framebuffers_) {
         if (fb != VK_NULL_HANDLE) vkDestroyFramebuffer(device_, fb, nullptr);
@@ -97,7 +116,18 @@ void VulkanBackend::shutdown() {
 
     for (auto view : swapchain_views_) vkDestroyImageView(device_, view, nullptr);
     swapchain_views_.clear();
-
+    if (headless_color_view_) {
+        vkDestroyImageView(device_, headless_color_view_, nullptr);
+        headless_color_view_ = VK_NULL_HANDLE;
+    }
+    if (headless_color_image_) {
+        vkDestroyImage(device_, headless_color_image_, nullptr);
+        headless_color_image_ = VK_NULL_HANDLE;
+    }
+    if (headless_color_memory_) {
+        vkFreeMemory(device_, headless_color_memory_, nullptr);
+        headless_color_memory_ = VK_NULL_HANDLE;
+    }
     if (swapchain_) vkDestroySwapchainKHR(device_, swapchain_, nullptr);
     if (surface_) SDL_Vulkan_DestroySurface(instance_, surface_, nullptr);
     if (device_) vkDestroyDevice(device_, nullptr);
@@ -115,14 +145,16 @@ bool VulkanBackend::create_instance() {
     app_info.engineVersion = VK_MAKE_VERSION(1, 4, 3);
     app_info.apiVersion = VK_API_VERSION_1_3;
 
-    Uint32 sdl_ext_count = 0;
-    char const * const *sdl_extensions = SDL_Vulkan_GetInstanceExtensions(&sdl_ext_count);
-    if (!sdl_extensions) {
-        std::fprintf(stderr, "[Vulkan] Could not query SDL instance extensions: %s\n", SDL_GetError());
-        return false;
+    std::vector<const char *> extensions;
+    if (!config_.headless) {
+        Uint32 sdl_ext_count = 0;
+        char const * const *sdl_extensions = SDL_Vulkan_GetInstanceExtensions(&sdl_ext_count);
+        if (!sdl_extensions) {
+            std::fprintf(stderr, "[Vulkan] Could not query SDL instance extensions: %s\n", SDL_GetError());
+            return false;
+        }
+        extensions.assign(sdl_extensions, sdl_extensions + sdl_ext_count);
     }
-
-    std::vector<const char *> extensions(sdl_extensions, sdl_extensions + sdl_ext_count);
 
     VkInstanceCreateInfo create_info{};
     create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -167,8 +199,11 @@ bool VulkanBackend::select_physical_device() {
         vkGetPhysicalDeviceQueueFamilyProperties(dev, &q_count, q_props.data());
 
         for (uint32_t i = 0; i < q_count; i++) {
-            VkBool32 present_support = false;
-            vkGetPhysicalDeviceSurfaceSupportKHR(dev, i, surface_, &present_support);
+            VkBool32 present_support = VK_TRUE;
+            if (!config_.headless) {
+                present_support = VK_FALSE;
+                vkGetPhysicalDeviceSurfaceSupportKHR(dev, i, surface_, &present_support);
+            }
             if ((q_props[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) && present_support) {
                 physical_device_ = dev;
                 queue_family_ = i;
@@ -178,7 +213,8 @@ bool VulkanBackend::select_physical_device() {
         }
     }
 
-    std::fprintf(stderr, "[Vulkan] Suitable GPU with graphics and present queue not found.\n");
+    std::fprintf(stderr, "[Vulkan] Suitable GPU with graphics%s queue not found.\n",
+                 config_.headless ? "" : " and present");
     return false;
 }
 
@@ -199,9 +235,10 @@ bool VulkanBackend::create_device() {
     features13.synchronization2 = VK_TRUE;
     features2.pNext = &features13;
 
-    std::vector<const char *> extensions = {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME
-    };
+    std::vector<const char *> extensions;
+    if (!config_.headless) {
+        extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    }
 
     VkDeviceCreateInfo create_info{};
     create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -274,6 +311,109 @@ bool VulkanBackend::create_swapchain() {
     return true;
 }
 
+bool VulkanBackend::create_headless_render_target(uint32_t width, uint32_t height) {
+    if (!device_ || width == 0 || height == 0 || width > 8192 || height > 8192) {
+        return false;
+    }
+
+    if (headless_color_framebuffer_) {
+        vkDestroyFramebuffer(device_, headless_color_framebuffer_, nullptr);
+        headless_color_framebuffer_ = VK_NULL_HANDLE;
+    }
+    if (headless_color_view_) {
+        vkDestroyImageView(device_, headless_color_view_, nullptr);
+        headless_color_view_ = VK_NULL_HANDLE;
+    }
+    if (headless_color_image_) {
+        vkDestroyImage(device_, headless_color_image_, nullptr);
+        headless_color_image_ = VK_NULL_HANDLE;
+    }
+    if (headless_color_memory_) {
+        vkFreeMemory(device_, headless_color_memory_, nullptr);
+        headless_color_memory_ = VK_NULL_HANDLE;
+    }
+
+    swapchain_extent_ = {width, height};
+    swapchain_format_ = VK_FORMAT_R8G8B8A8_UNORM;
+
+    VkImageCreateInfo image_info{};
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.format = swapchain_format_;
+    image_info.extent = {width, height, 1};
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1;
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                       VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    if (vkCreateImage(device_, &image_info, nullptr, &headless_color_image_) != VK_SUCCESS) {
+        std::fprintf(stderr, "[Vulkan] Failed to create headless color image.\n");
+        return false;
+    }
+
+    VkMemoryRequirements requirements{};
+    vkGetImageMemoryRequirements(device_, headless_color_image_, &requirements);
+    VkPhysicalDeviceMemoryProperties memory_properties{};
+    vkGetPhysicalDeviceMemoryProperties(physical_device_, &memory_properties);
+    uint32_t memory_type = UINT32_MAX;
+    for (uint32_t i = 0; i < memory_properties.memoryTypeCount; ++i) {
+        if ((requirements.memoryTypeBits & (1u << i)) != 0 &&
+            (memory_properties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0) {
+            memory_type = i;
+            break;
+        }
+    }
+    if (memory_type == UINT32_MAX) {
+        std::fprintf(stderr, "[Vulkan] No device-local memory type for headless color image.\n");
+        return false;
+    }
+
+    VkMemoryAllocateInfo allocation{};
+    allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocation.allocationSize = requirements.size;
+    allocation.memoryTypeIndex = memory_type;
+    if (vkAllocateMemory(device_, &allocation, nullptr, &headless_color_memory_) != VK_SUCCESS ||
+        vkBindImageMemory(device_, headless_color_image_, headless_color_memory_, 0) != VK_SUCCESS) {
+        std::fprintf(stderr, "[Vulkan] Failed to allocate headless color image memory.\n");
+        return false;
+    }
+
+    VkImageViewCreateInfo view_info{};
+    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.image = headless_color_image_;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.format = swapchain_format_;
+    view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info.subresourceRange.levelCount = 1;
+    view_info.subresourceRange.layerCount = 1;
+    if (vkCreateImageView(device_, &view_info, nullptr, &headless_color_view_) != VK_SUCCESS) {
+        std::fprintf(stderr, "[Vulkan] Failed to create headless color image view.\n");
+        return false;
+    }
+    return true;
+}
+
+bool VulkanBackend::ensure_headless_render_target(uint32_t width, uint32_t height) {
+    if (!initialized_ || !config_.headless || is_mock_) return false;
+    if (width == 0) width = swapchain_extent_.width;
+    if (height == 0) height = swapchain_extent_.height;
+    if (headless_color_image_ && width == swapchain_extent_.width &&
+        height == swapchain_extent_.height && headless_color_framebuffer_) {
+        return true;
+    }
+    if (!create_headless_render_target(width, height)) return false;
+    return create_framebuffers();
+}
+
+bool prepare_active_headless_render_target() {
+    VulkanBackend *backend = VulkanBackend::get_active();
+    return backend && backend->ensure_headless_render_target();
+}
+
 bool VulkanBackend::create_render_pass() {
     VkAttachmentDescription color_attachment{};
     color_attachment.format = swapchain_format_;
@@ -283,7 +423,9 @@ bool VulkanBackend::create_render_pass() {
     color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    color_attachment.finalLayout = config_.headless
+        ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+        : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
     VkAttachmentReference color_attachment_ref{};
     color_attachment_ref.attachment = 0;
@@ -305,6 +447,20 @@ bool VulkanBackend::create_render_pass() {
 }
 
 bool VulkanBackend::create_framebuffers() {
+    if (config_.headless) {
+        if (!headless_color_view_) return false;
+        VkFramebufferCreateInfo framebuffer_info{};
+        framebuffer_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebuffer_info.renderPass = render_pass_;
+        framebuffer_info.attachmentCount = 1;
+        framebuffer_info.pAttachments = &headless_color_view_;
+        framebuffer_info.width = swapchain_extent_.width;
+        framebuffer_info.height = swapchain_extent_.height;
+        framebuffer_info.layers = 1;
+        return vkCreateFramebuffer(device_, &framebuffer_info, nullptr,
+                                   &headless_color_framebuffer_) == VK_SUCCESS;
+    }
+
     swapchain_framebuffers_.resize(swapchain_views_.size());
     for (size_t i = 0; i < swapchain_views_.size(); i++) {
         VkImageView attachments[] = {swapchain_views_[i]};
@@ -358,8 +514,9 @@ bool VulkanBackend::create_sync_objects() {
     fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        if (vkCreateSemaphore(device_, &sem_info, nullptr, &image_available_semaphores_[i]) != VK_SUCCESS ||
-            vkCreateSemaphore(device_, &sem_info, nullptr, &render_finished_semaphores_[i]) != VK_SUCCESS ||
+        if ((!config_.headless &&
+             (vkCreateSemaphore(device_, &sem_info, nullptr, &image_available_semaphores_[i]) != VK_SUCCESS ||
+              vkCreateSemaphore(device_, &sem_info, nullptr, &render_finished_semaphores_[i]) != VK_SUCCESS)) ||
             vkCreateFence(device_, &fence_info, nullptr, &in_flight_fences_[i]) != VK_SUCCESS) {
             return false;
         }
@@ -371,9 +528,13 @@ void VulkanBackend::begin_frame() {
     vkWaitForFences(device_, 1, &in_flight_fences_[current_frame_], VK_TRUE, UINT64_MAX);
     vkResetFences(device_, 1, &in_flight_fences_[current_frame_]);
 
-    vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX,
-                          image_available_semaphores_[current_frame_],
-                          VK_NULL_HANDLE, &current_image_index_);
+    if (config_.headless) {
+        current_image_index_ = 0;
+    } else {
+        vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX,
+                              image_available_semaphores_[current_frame_],
+                              VK_NULL_HANDLE, &current_image_index_);
+    }
 
     VkCommandBuffer cmd = command_buffers_[current_frame_];
     vkResetCommandBuffer(cmd, 0);
@@ -385,7 +546,9 @@ void VulkanBackend::begin_frame() {
     VkRenderPassBeginInfo rp_info{};
     rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rp_info.renderPass = render_pass_;
-    rp_info.framebuffer = swapchain_framebuffers_[current_image_index_];
+    rp_info.framebuffer = config_.headless
+        ? headless_color_framebuffer_
+        : swapchain_framebuffers_[current_image_index_];
     rp_info.renderArea.offset = {0, 0};
     rp_info.renderArea.extent = swapchain_extent_;
 
@@ -403,30 +566,33 @@ void VulkanBackend::end_frame() {
 
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    VkSemaphore wait_semaphores[] = {image_available_semaphores_[current_frame_]};
-    VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    submit_info.waitSemaphoreCount = 1;
-    submit_info.pWaitSemaphores = wait_semaphores;
-    submit_info.pWaitDstStageMask = wait_stages;
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers = &cmd;
 
+    VkSemaphore wait_semaphores[] = {image_available_semaphores_[current_frame_]};
+    VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     VkSemaphore signal_semaphores[] = {render_finished_semaphores_[current_frame_]};
-    submit_info.signalSemaphoreCount = 1;
-    submit_info.pSignalSemaphores = signal_semaphores;
+    if (!config_.headless) {
+        submit_info.waitSemaphoreCount = 1;
+        submit_info.pWaitSemaphores = wait_semaphores;
+        submit_info.pWaitDstStageMask = wait_stages;
+        submit_info.signalSemaphoreCount = 1;
+        submit_info.pSignalSemaphores = signal_semaphores;
+    }
 
     vkQueueSubmit(queue_, 1, &submit_info, in_flight_fences_[current_frame_]);
 
-    VkPresentInfoKHR present_info{};
-    present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    present_info.waitSemaphoreCount = 1;
-    present_info.pWaitSemaphores = signal_semaphores;
-    VkSwapchainKHR swapchains[] = {swapchain_};
-    present_info.swapchainCount = 1;
-    present_info.pSwapchains = swapchains;
-    present_info.pImageIndices = &current_image_index_;
-
-    vkQueuePresentKHR(queue_, &present_info);
+    if (!config_.headless) {
+        VkPresentInfoKHR present_info{};
+        present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        present_info.waitSemaphoreCount = 1;
+        present_info.pWaitSemaphores = signal_semaphores;
+        VkSwapchainKHR swapchains[] = {swapchain_};
+        present_info.swapchainCount = 1;
+        present_info.pSwapchains = swapchains;
+        present_info.pImageIndices = &current_image_index_;
+        vkQueuePresentKHR(queue_, &present_info);
+    }
 
     current_frame_ = (current_frame_ + 1) % MAX_FRAMES_IN_FLIGHT;
 }
@@ -434,6 +600,12 @@ void VulkanBackend::end_frame() {
 void VulkanBackend::resize(int width, int height) {
     if (!initialized_) return;
     vkDeviceWaitIdle(device_);
+
+    if (config_.headless) {
+        ensure_headless_render_target(static_cast<uint32_t>(std::max(width, 1)),
+                                      static_cast<uint32_t>(std::max(height, 1)));
+        return;
+    }
 
     for (auto fb : swapchain_framebuffers_) vkDestroyFramebuffer(device_, fb, nullptr);
     swapchain_framebuffers_.clear();

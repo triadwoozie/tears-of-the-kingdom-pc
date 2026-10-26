@@ -19,6 +19,7 @@ namespace totk::graphics {
 struct GraphicsConfig {
     int window_width = 1920;
     int window_height = 1080;
+    bool headless = false;
     int internal_scale = 1;       // 1 = 900p, 2 = 1800p, etc.
     int aspect_ratio_mode = 0;   // 0 = 16:9, 1 = 16:10, 2 = 21:9, 3 = 32:9
     int fps_cap = 60;
@@ -97,6 +98,7 @@ public:
 
     bool initialize(SDL_Window *window, const GraphicsConfig &config);
     bool initialize_mock();
+    bool ensure_headless_render_target(uint32_t width = 0, uint32_t height = 0);
     void shutdown();
 
     bool is_mock() const { return is_mock_; }
@@ -168,6 +170,7 @@ private:
     bool create_swapchain();
     bool create_render_pass();
     bool create_framebuffers();
+    bool create_headless_render_target(uint32_t width, uint32_t height);
     bool create_command_pool();
     bool create_sync_objects();
 
@@ -225,6 +228,10 @@ private:
     std::vector<VkImage> swapchain_images_;
     std::vector<VkImageView> swapchain_views_;
     std::vector<VkFramebuffer> swapchain_framebuffers_;
+    VkImage headless_color_image_ = VK_NULL_HANDLE;
+    VkDeviceMemory headless_color_memory_ = VK_NULL_HANDLE;
+    VkImageView headless_color_view_ = VK_NULL_HANDLE;
+    VkFramebuffer headless_color_framebuffer_ = VK_NULL_HANDLE;
 
     VkRenderPass render_pass_ = VK_NULL_HANDLE;
     VkCommandPool command_pool_ = VK_NULL_HANDLE;

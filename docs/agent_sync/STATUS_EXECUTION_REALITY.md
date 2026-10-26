@@ -40,3 +40,25 @@ Top mentions: 1536 f_71048cb3dc; 684 f_7106a37c4c;
 Filesystem tail: dummy ResourceMgr loads; hid, audren:u, and fsp-srv acquisition
 GPU tail: nvnDeviceGetProcAddress enumeration; no draw/submit/present marker
 ```
+
+## Headless Resource/Vulkan Follow-up
+
+**Observed:** 2026-10-26, after adding `--headless` and ResourceMgr filesystem
+bindings.
+
+- The offscreen Vulkan backend initialized successfully on the AMD Radeon 680M
+  (`[Vulkan] Initialized Vulkan 1.3 headless offscreen backend successfully.`).
+  No SDL window or swapchain was needed.
+- ResourceMgr requests now resolve guest path strings and call
+  `FileSystemHLE::read_romfs_file`, which uses the existing compressed-file and
+  multi-dictionary Zstd path when applicable. This checkout has no
+  `work/romfs` directory, so requests such as `RSDB/Tag.All.rstbl.byml` and
+  `Pack/Bootup.Nin_NX_NVN.pack` could not be loaded; they correctly returned
+  failure instead of fabricated file contents.
+- The 20-second bounded boot did not reach its timeout: it exited 139 after
+  missing-resource failures and an invalid indirect guest target. This is
+  consistent with absent local RomFS data, but the exact guest crash cause is
+  not established.
+- The backend target and display-vsync event initialization were reached. The
+  trace contains no evidence that the RenderBuffer hook advanced into command
+  recording or that a frame was rendered.

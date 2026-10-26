@@ -1,7 +1,11 @@
 #include "hlr_sead.h"
 #include "recompiler/dispatch.h"
 #include "recompiler/arm64_ctx.h"
+#include "graphics/headless_bridge.h"
+#include "runtime/filesystem_hle.h"
+#include "runtime/game_framework_hle.h"
 #include "runtime/memory_manager.h"
+#include "runtime/runtime_config.h"
 #include <algorithm>
 #include <cmath>
 #include <immintrin.h>
@@ -13,6 +17,8 @@
 #include <thread>
 #include <chrono>
 #include <mutex>
+#include <string>
+#include <vector>
 
 namespace totk::hlr {
 
@@ -60,6 +66,8 @@ static uint64_t get_dummy_sead_resource() {
     }();
     return s_dummy_resource;
 }
+
+#include "runtime/hlr_autogen.inc"
 
 static uint64_t get_safe_container_node() {
     static uint64_t s_node = 0;
@@ -844,20 +852,12 @@ void register_sead_hlr_hooks() {
 
     // Hook sead::ResourceMgr::load (0x7104214ea8)
     totk::recompiler::register_recompiled_func(0x7104214ea8ULL, [](Arm64Context *c) {
-        std::printf("  [HLR Hook] sead::ResourceMgr::load (0x7104214ea8) from LR=0x%llx -> returning dummy resource\n",
-                    static_cast<unsigned long long>(c->x[30]));
-        std::fflush(stdout);
-        c->x[0] = get_dummy_sead_resource();
-        c->pc = c->x[30];
+        hlr_sead_resource_load(c);
     });
 
     // Hook sead::ResourceMgr::tryLoad (0x7104215360)
     totk::recompiler::register_recompiled_func(0x7104215360ULL, [](Arm64Context *c) {
-        std::printf("  [HLR Hook] sead::ResourceMgr::tryLoad (0x7104215360) from LR=0x%llx -> returning dummy resource\n",
-                    static_cast<unsigned long long>(c->x[30]));
-        std::fflush(stdout);
-        c->x[0] = get_dummy_sead_resource();
-        c->pc = c->x[30];
+        hlr_sead_resource_load(c);
     });
 
     // Hook f_7104cb4a40 (system archive/resource package initializer)
@@ -1014,8 +1014,12 @@ void register_sead_hlr_hooks() {
 
     // Hook f_71048cb3dc (RenderBuffer setup)
     totk::recompiler::register_recompiled_func(0x71048cb3dcULL, [](Arm64Context *c) {
-        std::printf("  [HLR Hook] f_71048cb3dc (RenderBuffer init) -> clean return\n");
-        std::fflush(stdout);
+        if (totk::g_headless_mode) {
+            if (!totk::graphics::prepare_active_headless_render_target()) {
+                std::fprintf(stderr, "[HLR RenderBuffer] Failed to prepare headless Vulkan target.\n");
+            }
+            totk::runtime::signal_display_vsync_event();
+        }
         c->x[0] = 0;
         c->pc = c->x[30];
     });

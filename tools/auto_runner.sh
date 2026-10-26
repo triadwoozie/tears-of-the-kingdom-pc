@@ -32,7 +32,7 @@ while true; do
 
         if ninja -C build -j 2 && ctest --test-dir build -j 2 --output-on-failure; then
             boot_status=0
-            timeout 25s ./build/totk_recomp --boot-real > work/boot_trace_latest.log 2>&1 || boot_status=$?
+            timeout 25s ./build/totk_recomp --boot-real --headless > work/boot_trace_latest.log 2>&1 || boot_status=$?
 
             {
                 printf 'Remote commit: %s\n' "$remote_head"
