@@ -36,3 +36,5 @@ reference_repos/
 .idea/
 *.swp
 *.DS_Store
+
+refs/

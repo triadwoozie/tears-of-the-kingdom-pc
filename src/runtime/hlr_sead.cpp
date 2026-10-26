@@ -225,7 +225,11 @@ void register_sead_hlr_hooks() {
         if (flag & 1) {
             c->x[0] = c->x[0] + 0x30;
         } else {
-            c->x[0] = 0;
+            c->x[0] = c->x[0] + 0x30;
+            if (is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                      c->x[0], 0x20)) {
+                *reinterpret_cast<uint64_t *>(c->x[0] + 0x18) = 0;
+            }
         }
         c->pc = c->x[30];
     });
@@ -244,8 +248,33 @@ void register_sead_hlr_hooks() {
         if (flag & 1) {
             c->x[0] = c->x[0] + 0x58;
         } else {
-            c->x[0] = 0;
+            c->x[0] = c->x[0] + 0x58;
+            if (is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                      c->x[0], 0x20)) {
+                *reinterpret_cast<uint64_t *>(c->x[0] + 0x18) = 0;
+            }
         }
+        c->pc = c->x[30];
+    });
+
+    totk::recompiler::register_recompiled_func(0x7104af51a4ULL, [](Arm64Context *c) {
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   c->x[0], 0x20)) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+        uint64_t cur = c->x[0];
+        uint32_t count = 0;
+        while (cur != 0 && count < 100000) {
+            if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                       cur, 0x20)) break;
+            uint64_t next = *reinterpret_cast<const uint64_t *>(cur + 0x18);
+            count++;
+            if (next == 0) break;
+            cur = next;
+        }
+        c->x[0] = count;
         c->pc = c->x[30];
     });
 
