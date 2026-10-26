@@ -1,4 +1,5 @@
 #include "services_hle.h"
+#include "audio_hle.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -770,6 +771,7 @@ uint32_t ServicesHLE::dispatch_ipc(uint32_t handle, void *buffer, size_t size) {
         case KIND_AUD_MANAGER: {
             if (cmd_id == 0) {
                 // OpenAudioRenderer
+                AudioRendererHLE::instance().open_renderer(payload, payload_len);
                 open_kind = KIND_AUD_RENDERER;
                 result_code = 0;
             } else if (cmd_id == 1) {
@@ -777,6 +779,65 @@ uint32_t ServicesHLE::dispatch_ipc(uint32_t handle, void *buffer, size_t size) {
                 static uint64_t work_sz = 1024 * 1024; // 1 MiB work buffer
                 out_data = &work_sz;
                 out_data_len = sizeof(work_sz);
+                result_code = 0;
+            } else if (cmd_id == 2 || cmd_id == 4) {
+                // GetAudioDeviceService
+                open_kind = KIND_AUD_DEVICE;
+                result_code = 0;
+            }
+            break;
+        }
+
+        case KIND_AUD_RENDERER: {
+            if (cmd_id == 0) {
+                // GetAudioRendererState
+                static uint32_t state = 0; // 0 = Started
+                state = AudioRendererHLE::instance().is_started() ? 0 : 1;
+                out_data = &state;
+                out_data_len = sizeof(state);
+                result_code = 0;
+            } else if (cmd_id == 4) {
+                // RequestUpdateAudioRenderer
+                uint64_t in_buf_addr = 0, in_buf_len = 0;
+                uint64_t out_buf_addr = 0, out_buf_cap = 0;
+                int found_bufs = 0;
+                for (size_t d = 8; d + 12 <= aligned_cmif; d += 4) {
+                    uint32_t w0 = *reinterpret_cast<uint32_t *>(bytes + d);
+                    uint32_t w1 = *reinterpret_cast<uint32_t *>(bytes + d + 4);
+                    uint32_t w2 = *reinterpret_cast<uint32_t *>(bytes + d + 8);
+                    uint64_t blen = w0 | ((uint64_t)((w2 >> 24) & 15) << 32);
+                    uint64_t baddr = w1 | ((uint64_t)(w2 >> 28) << 32) | ((uint64_t)((w2 >> 2) & 0x3fffff) << 36);
+                    if (baddr >= 0x7000000000ULL && baddr < 0x7300000000ULL && blen > 0) {
+                        if (found_bufs == 0) {
+                            in_buf_addr = baddr;
+                            in_buf_len = blen;
+                            found_bufs = 1;
+                            d += 8;
+                        } else if (found_bufs == 1) {
+                            out_buf_addr = baddr;
+                            out_buf_cap = blen;
+                            found_bufs = 2;
+                            break;
+                        }
+                    }
+                }
+                if (out_buf_addr != 0 && out_buf_cap > 0) {
+                    AudioRendererHLE::instance().update_audio_renderer(
+                        reinterpret_cast<const void *>(in_buf_addr), static_cast<size_t>(in_buf_len),
+                        reinterpret_cast<void *>(out_buf_addr), static_cast<size_t>(out_buf_cap));
+                }
+                result_code = 0;
+            } else if (cmd_id == 5) {
+                // StartAudioRenderer
+                AudioRendererHLE::instance().start_renderer();
+                result_code = 0;
+            } else if (cmd_id == 6) {
+                // StopAudioRenderer
+                AudioRendererHLE::instance().stop_renderer();
+                result_code = 0;
+            } else if (cmd_id == 7) {
+                // QuerySystemEvent
+                new_handle = AudioRendererHLE::instance().get_system_event();
                 result_code = 0;
             }
             break;

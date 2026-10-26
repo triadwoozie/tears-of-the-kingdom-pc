@@ -1,8 +1,10 @@
 #include "runtime/audio_hle.h"
+#include "runtime/services_hle.h"
 #include "runtime/guest_abi/nn_hid_abi.h"
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 void test_hid_gamepad_mapping() {
@@ -79,6 +81,70 @@ void test_audio_hle_pipeline() {
     std::printf("  -> Audio HLE Multi-Voice Mixing: PASSED\n");
 }
 
+void test_audio_renderer_workbuffer_update() {
+    std::printf("[Test] Running test_audio_renderer_workbuffer_update...\n");
+
+    auto &audio = totk::runtime::AudioRendererHLE::instance();
+
+    // 1. Initialize configuration via open_renderer
+    uint32_t candidate[13]{0};
+    candidate[0] = 48000;
+    candidate[1] = 240;
+    candidate[2] = 2;
+    candidate[4] = 64;  // voice count
+    candidate[5] = 1;   // sink count
+    candidate[6] = 4;   // submix count
+    candidate[12] = 0x3f564552; // 'REV?'
+    audio.open_renderer(candidate, sizeof(candidate));
+
+    // 2. Lifecycle & events
+    audio.start_renderer();
+    assert(audio.is_started() == true);
+    assert(audio.get_system_event() != 0);
+
+    // 3. Synthesize input workbuffer
+    std::vector<uint8_t> in_buffer(1024 * 64, 0);
+    uint32_t *in_hdr = reinterpret_cast<uint32_t *>(in_buffer.data());
+    in_hdr[0] = 0x3f564552;
+    in_hdr[1] = 16;
+    unsigned pools = 64 * 4 + 4;
+    in_hdr[2] = pools * 32;
+
+    // Set sample pool state: state 4 (Attached) -> should become 5
+    uint32_t state_attached = 4;
+    std::memcpy(in_buffer.data() + 64 + in_hdr[1] + 0 * 32 + 16, &state_attached, sizeof(state_attached));
+
+    // Output buffer
+    std::vector<uint8_t> out_buffer(1024 * 64, 0);
+    size_t written = audio.update_audio_renderer(in_buffer.data(), in_buffer.size(), out_buffer.data(), out_buffer.size());
+    assert(written >= 64);
+    assert(audio.get_update_call_count() > 0);
+
+    const uint32_t *out_hdr = reinterpret_cast<const uint32_t *>(out_buffer.data());
+    assert(out_hdr[0] == 0x3f564552); // Valid revision magic
+    assert(out_hdr[15] == written);
+
+    // Verify converted pool state: 4 -> 5
+    uint32_t converted_state = 0;
+    std::memcpy(&converted_state, out_buffer.data() + 64 + 0 * 16, sizeof(converted_state));
+    assert(converted_state == 5);
+
+    // Verify frame counter at tail
+    uint64_t tail_frame = 0;
+    std::memcpy(&tail_frame, out_buffer.data() + written - 16, sizeof(tail_frame));
+    assert(tail_frame == 0); // first update produces frame 0
+
+    // Second update advances frames
+    written = audio.update_audio_renderer(in_buffer.data(), in_buffer.size(), out_buffer.data(), out_buffer.size());
+    std::memcpy(&tail_frame, out_buffer.data() + written - 16, sizeof(tail_frame));
+    assert(tail_frame == 1);
+
+    audio.stop_renderer();
+    assert(audio.is_started() == false);
+
+    std::printf("  -> Audio Renderer WorkBuffer Update & State Confirmation: PASSED\n");
+}
+
 int main() {
     std::printf("==================================================\n");
     std::printf("  Audio & HID Subsystems Unit Tests\n");
@@ -86,6 +152,7 @@ int main() {
 
     test_hid_gamepad_mapping();
     test_audio_hle_pipeline();
+    test_audio_renderer_workbuffer_update();
 
     std::printf("\nAll Audio & HID unit tests PASSED successfully!\n");
     return 0;
