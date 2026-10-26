@@ -1,4 +1,5 @@
 #include "runtime/audio_hle.h"
+#include "runtime/hid_hle.h"
 #include "runtime/services_hle.h"
 #include "runtime/guest_abi/nn_hid_abi.h"
 #include <cassert>
@@ -145,6 +146,93 @@ void test_audio_renderer_workbuffer_update() {
     std::printf("  -> Audio Renderer WorkBuffer Update & State Confirmation: PASSED\n");
 }
 
+void test_hid_shared_memory_and_service() {
+    std::printf("[Test] Running test_hid_shared_memory_and_service...\n");
+
+    auto &hid = totk::runtime::HidHLE::instance();
+    hid.reset();
+
+    // 1. Verify shared memory sizing
+    assert(hid.get_shared_memory_size() == 0x40000);
+    assert(hid.get_shared_memory_bytes() != nullptr);
+
+    // 2. Controller input update
+    uint64_t buttons = nn::hid::NpadButton::A | nn::hid::NpadButton::Plus | nn::hid::NpadButton::ZR;
+    hid.update_from_controller(buttons, -0.5f, 0.75f, 1.0f, -1.0f);
+
+    assert(hid.get_sampling_number() == 1);
+    assert(hid.get_current_buttons() == buttons);
+
+    nn::hid::NpadFullKeyState npad_full[1]{};
+    int retrieved = hid.get_npad_states(npad_full, 1, 0);
+    assert(retrieved == 1);
+    assert(npad_full[0].sampling_number == 1);
+    assert(npad_full[0].buttons == buttons);
+    assert(npad_full[0].analog_stick_l.x < 0);
+    assert(npad_full[0].analog_stick_l.y > 0);
+    assert(npad_full[0].analog_stick_r.x == 32767);
+    assert(npad_full[0].analog_stick_r.y == -32767);
+    assert(npad_full[0].attributes == 3);
+
+    // Verify shared memory contains state at 0x4800
+    const uint8_t *shmem = hid.get_shared_memory_bytes();
+    nn::hid::NpadBaseState shm_state{};
+    std::memcpy(&shm_state, shmem + 0x4800, sizeof(shm_state));
+    assert(shm_state.sampling_number == 1);
+    assert(shm_state.buttons == buttons);
+    assert(shm_state.analog_stick_r.x == 32767);
+
+    // 3. Touch input update
+    hid.update_touch(true, 0.5f, 0.5f);
+    assert(hid.get_sampling_number() == 2);
+    uint32_t touch_x = 0, touch_y = 0;
+    std::memcpy(&touch_x, shmem + 0x400 + 16, sizeof(touch_x));
+    std::memcpy(&touch_y, shmem + 0x400 + 20, sizeof(touch_y));
+    assert(touch_x == 640);
+    assert(touch_y == 360);
+
+    // 4. Keyboard input update
+    bool keys[128]{false};
+    keys[26] = true; // W (DUp)
+    keys[44] = true; // Space (B)
+    hid.update_from_keyboard(keys, 128);
+    assert((hid.get_current_buttons() & nn::hid::NpadButton::DUp) != 0);
+    assert((hid.get_current_buttons() & nn::hid::NpadButton::B) != 0);
+
+    // 5. IPC service integration
+    auto &services = totk::runtime::ServicesHLE::instance();
+    uint32_t hid_handle = 0;
+    bool connected = services.connect_port("hid", &hid_handle);
+    assert(connected);
+    assert(hid_handle != 0);
+
+    // Send CreateAppletResource (cmd 0) to hid session
+    uint8_t ipc_buf[256]{0};
+    uint32_t *cmif = reinterpret_cast<uint32_t *>(ipc_buf + 16);
+    cmif[0] = 0x49434653; // SFCI
+    cmif[2] = 0;          // cmd 0: CreateAppletResource
+    uint32_t res = services.dispatch_ipc(hid_handle, ipc_buf, sizeof(ipc_buf));
+    assert(res == 0);
+
+    // Verify opened applet resource handle was assigned
+    uint32_t *reply_cmif = reinterpret_cast<uint32_t *>(ipc_buf);
+    uint32_t applet_res_handle = reply_cmif[3];
+    assert(applet_res_handle != 0);
+
+    // Send GetSharedMemoryHandle (cmd 0) to applet resource session
+    std::memset(ipc_buf, 0, sizeof(ipc_buf));
+    cmif = reinterpret_cast<uint32_t *>(ipc_buf + 16);
+    cmif[0] = 0x49434653;
+    cmif[2] = 0; // cmd 0: GetSharedMemoryHandle
+    res = services.dispatch_ipc(applet_res_handle, ipc_buf, sizeof(ipc_buf));
+    assert(res == 0);
+    reply_cmif = reinterpret_cast<uint32_t *>(ipc_buf);
+    uint32_t returned_shm_handle = reply_cmif[3];
+    assert(returned_shm_handle == hid.get_shared_memory_handle());
+
+    std::printf("  -> HID Shared Memory & IPC Service Lifecycle: PASSED\n");
+}
+
 int main() {
     std::printf("==================================================\n");
     std::printf("  Audio & HID Subsystems Unit Tests\n");
@@ -153,6 +241,7 @@ int main() {
     test_hid_gamepad_mapping();
     test_audio_hle_pipeline();
     test_audio_renderer_workbuffer_update();
+    test_hid_shared_memory_and_service();
 
     std::printf("\nAll Audio & HID unit tests PASSED successfully!\n");
     return 0;

@@ -78,6 +78,7 @@ add_library(totk_recomp_runtime STATIC
     src/runtime/video_hle.cpp
     src/runtime/module_loader.cpp
     src/runtime/game_framework_hle.cpp
+    src/runtime/hid_hle.cpp
     ${PLATFORM_SOURCES}
 )
 target_include_directories(totk_recomp_runtime PUBLIC

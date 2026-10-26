@@ -1,5 +1,6 @@
 #include "services_hle.h"
 #include "audio_hle.h"
+#include "hid_hle.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -44,6 +45,8 @@ enum ServiceKind {
     KIND_LAUNCH_STORAGE,
     KIND_LAUNCH_ACCESSOR,
     KIND_ACCOUNT_MANAGER,
+    KIND_HID,
+    KIND_HID_APPLET_RESOURCE,
 };
 
 static const char *s_kind_names[] = {
@@ -54,7 +57,8 @@ static const char *s_kind_names[] = {
     "rom-storage", "acc:u0", "account-profile", "pl:u",
     "audren:u", "audio-renderer", "audio-device", "save-filesystem",
     "vi:u", "nvdrv", "pctl", "pctl-service",
-    "application-functions", "launch-storage", "launch-accessor", "account-manager"
+    "application-functions", "launch-storage", "launch-accessor", "account-manager",
+    "hid", "hid-applet-resource"
 };
 
 struct SessionObject {
@@ -129,6 +133,10 @@ bool ServicesHLE::connect_port(const std::string &port_name, uint32_t *handle) {
     }
     if (port_name == "audren:u") {
         *handle = allocate_session(KIND_AUD_MANAGER);
+        return true;
+    }
+    if (port_name == "hid") {
+        *handle = allocate_session(KIND_HID);
         return true;
     }
 
@@ -341,6 +349,7 @@ uint32_t ServicesHLE::dispatch_ipc(uint32_t handle, void *buffer, size_t size) {
                 else if (name_str.rfind("lm", 0) == 0) target_kind = KIND_LM;
                 else if (name_str.rfind("pctl", 0) == 0) target_kind = KIND_PCTL;
                 else if (name_str.rfind("aoc:u", 0) == 0) target_kind = KIND_AOC;
+                else if (name_str.rfind("hid", 0) == 0) target_kind = KIND_HID;
 
                 open_kind = target_kind != KIND_NONE ? target_kind : KIND_SM;
                 result_code = 0;
@@ -838,6 +847,30 @@ uint32_t ServicesHLE::dispatch_ipc(uint32_t handle, void *buffer, size_t size) {
             } else if (cmd_id == 7) {
                 // QuerySystemEvent
                 new_handle = AudioRendererHLE::instance().get_system_event();
+                result_code = 0;
+            }
+            break;
+        }
+
+        case KIND_HID: {
+            if (cmd_id == 0) {
+                // CreateAppletResource
+                open_kind = KIND_HID_APPLET_RESOURCE;
+                result_code = 0;
+            } else if (cmd_id == 1) {
+                // ActivateDebugPad
+                result_code = 0;
+            } else if (cmd_id == 2) {
+                // ActivateTouchScreen
+                result_code = 0;
+            }
+            break;
+        }
+
+        case KIND_HID_APPLET_RESOURCE: {
+            if (cmd_id == 0) {
+                // GetSharedMemoryHandle
+                new_handle = HidHLE::instance().get_shared_memory_handle();
                 result_code = 0;
             }
             break;
