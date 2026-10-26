@@ -50,10 +50,13 @@ All 8 active stacked PR deliverables are staged in `work/outbox_prs/` with corre
 
 ### Milestone 5: `0005-fix-boot-progression.patch`
 - **Branch:** `stack:fix/boot-progression`
-- **Title:** `fix(runtime): resolve post-startup heap allocation crash and NVN proc address blocks`
+- **Title:** `fix(runtime): intercept direct-call heap allocations, add headless mode, and guard NVN procs`
 - **Body:** `pr_0005_body.md`
 - **Summary:**
-  - Implements an HLE interceptor on `0x080006a920` (`sead::Heap::alloc`) providing a 32 MiB fallback arena if requested size is 0 or if guest allocator returns NULL, preventing `SIGSEGV` at `f_800cb5e1c + 0x88`.
+  - Implements GNU ld / LLVM lld symbol wrappers (`-Wl,--wrap=f_80006a920` and `-Wl,--wrap=f_802bb74c0`) in `tools/build_game.py` and `src/runtime/dispatch.c` to intercept direct calls to `sead::Heap::alloc` that bypass the HLE table.
+  - Provides a thread-safe 32 MiB fallback arena ensuring allocations return valid zero-initialized memory when `c->x[1] == 0` or invalid, completely eliminating `SIGSEGV` at `0x8` in `f_800cb5e1c + 0x88`.
+  - Removes duplicate `hle_sead_heap_alloc_override` from `src/host/guest.c` to prevent collisions with PR #8 (0001).
+  - Adds `TOTK_HEADLESS` support in `src/runtime/platform/linux.c` (`plat_fatal_notice` and `crash_handler`) to skip interactive message boxes and exit immediately via `_exit(1)` in automated environments.
   - Replaces fatal `die()` in `nvnDeviceGetInteger` with non-fatal warning log when querying properties `> 0x5F`.
   - Replaces `hle_register(name, NULL)` with `nvn_nop_thunk` in `nvn_registry_guest_address` for dynamic checkpoint procedures (`nvnCommandBufferInsertCheckpointDynamic`, `nvnDeviceSetAutomaticCheckpointsEnable`, etc.).
 

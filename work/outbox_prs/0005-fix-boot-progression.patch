@@ -27,66 +27,129 @@ index 1aee291..d6e97b9 100644
 +    LOG("[nvn] stubbing unknown NVN symbol: %s", name);
 +    return hle_register(name, nvn_nop_thunk);
  }
-diff --git a/src/host/guest.c b/src/host/guest.c
-index b327ef1..8228019 100644
---- a/src/host/guest.c
-+++ b/src/host/guest.c
-@@ -95,3 +95,58 @@ static void guest_fault_report(void) {
- }
- extern void (*rt_fault_extra)(void);
- __attribute__((constructor)) static void install_fault_report(void) { rt_fault_extra = guest_fault_report; }
+diff --git a/src/runtime/dispatch.c b/src/runtime/dispatch.c
+index 50de728..8147f64 100644
+--- a/src/runtime/dispatch.c
++++ b/src/runtime/dispatch.c
+@@ -257,3 +257,82 @@ void fnprof_hit(uint64_t addr, uint64_t lr, uint64_t x0) { (void)addr; (void)lr;
+ 
+ // ---- CNTPCT_EL0: the Switch's 19.2 MHz system counter
+ uint64_t rt_ticks(void) { return (uint64_t)((unsigned __int128)plat_now_ns() * 12 / 625); }
 +
-+// Defensive fallback for sead::Heap::alloc (0x080006a920ull) when invoked without a valid heap context
-+static void hle_sead_heap_alloc_override(Cpu *c) {
-+    if (c->x[1] == 0) {
-+        static pthread_mutex_t s_fallback_lock = PTHREAD_MUTEX_INITIALIZER;
-+        static uint8_t *s_fallback_arena = NULL;
-+        static uint64_t s_fallback_used = 0;
-+        const uint64_t ARENA_SIZE = 32ULL << 20;  // 32 MiB fallback arena
-+        uint64_t size = c->x[0] ? c->x[0] : 0x230;
-+        uint64_t alignment = c->x[2] ? c->x[2] : 16;
-+        if (alignment < 8) alignment = 8;
-+        pthread_mutex_lock(&s_fallback_lock);
-+        if (!s_fallback_arena) {
-+            s_fallback_arena = (uint8_t *)hle_alloc(ARENA_SIZE);
-+        }
-+        uint64_t cur = (uint64_t)(uintptr_t)(s_fallback_arena + s_fallback_used);
-+        uint64_t aligned = (cur + (alignment - 1)) & ~(alignment - 1);
-+        uint64_t new_used = (aligned - (uint64_t)(uintptr_t)s_fallback_arena) + size;
-+        if (new_used <= ARENA_SIZE) {
-+            s_fallback_used = new_used;
-+            c->x[0] = aligned;
-+            memset((void *)(uintptr_t)c->x[0], 0, (size_t)size);
-+        } else {
-+            fprintf(stderr, "[totk] WARNING: sead::Heap fallback arena exhausted (%llu bytes requested)\n",
-+                    (unsigned long long)size);
-+            c->x[0] = 0;
-+        }
-+        pthread_mutex_unlock(&s_fallback_lock);
-+        fprintf(stderr, "[totk] sead::Heap::alloc with NULL heap pointer -> fallback arena alloc %#llx (size=%llu, lr=%#llx)\n",
-+                (unsigned long long)c->x[0], (unsigned long long)size, (unsigned long long)c->x[30]);
++// ---- Direct-call linker wrapper & fallback arena for sead::Heap::alloc (f_80006a920)
++// and sead::HeapMgr::getCurrentHeap (f_802bb74c0)
++void __real_f_80006a920(Cpu *c) __attribute__((weak));
++void __real_f_802bb74c0(Cpu *c) __attribute__((weak));
++
++static void *dispatch_fallback_heap_alloc(uint64_t size, uint64_t alignment) {
++    static pthread_mutex_t s_fallback_lock = PTHREAD_MUTEX_INITIALIZER;
++    static uint8_t *s_fallback_arena = NULL;
++    static uint64_t s_fallback_used = 0;
++    const uint64_t ARENA_SIZE = 32ULL << 20;  // 32 MiB fallback arena
++
++    if (!size) size = 0x230;
++    if (alignment < 8) alignment = 8;
++
++    pthread_mutex_lock(&s_fallback_lock);
++    if (!s_fallback_arena) {
++        s_fallback_arena = (uint8_t *)hle_alloc(ARENA_SIZE);
++    }
++    uint64_t cur = (uint64_t)(uintptr_t)(s_fallback_arena + s_fallback_used);
++    uint64_t aligned = (cur + (alignment - 1)) & ~(alignment - 1);
++    uint64_t new_used = (aligned - (uint64_t)(uintptr_t)s_fallback_arena) + size;
++    void *ptr = NULL;
++    if (new_used <= ARENA_SIZE) {
++        s_fallback_used = new_used;
++        ptr = (void *)(uintptr_t)aligned;
++        memset(ptr, 0, (size_t)size);
++    } else {
++        fprintf(stderr, "[totk] WARNING: sead::Heap fallback arena exhausted (%llu bytes requested)\n",
++                (unsigned long long)size);
++    }
++    pthread_mutex_unlock(&s_fallback_lock);
++    return ptr;
++}
++
++void __wrap_f_80006a920(Cpu *c) {
++    // If heap context in x1 is NULL or points to an invalid/unmapped range:
++    if (c->x[1] == 0 || c->x[1] < 0x10000ULL || c->x[1] >= (1ULL << 48)) {
++        uint64_t sz = c->x[0] ? c->x[0] : 0x230;
++        uint64_t align = c->x[2] ? c->x[2] : 16;
++        void *p = dispatch_fallback_heap_alloc(sz, align);
++        c->x[0] = (uint64_t)(uintptr_t)p;
++        fprintf(stderr, "[totk] sead::Heap::alloc direct-call intercept: invalid heap x1=%#llx -> fallback arena %#llx (size=%llu, lr=%#llx)\n",
++                (unsigned long long)c->x[1], (unsigned long long)c->x[0], (unsigned long long)sz, (unsigned long long)c->x[30]);
 +        return;
 +    }
-+    GuestFn orig = dispatch_lookup(0x080006a920ull);
-+    if (orig) orig(c);
-+    else c->x[0] = 0;
++    if (__real_f_80006a920) {
++        __real_f_80006a920(c);
++    } else {
++        c->x[0] = 0;
++    }
 +    if (c->x[0] == 0) {
-+        static pthread_mutex_t s_fallback_lock = PTHREAD_MUTEX_INITIALIZER;
-+        static uint8_t *s_fallback_arena = NULL;
-+        static uint64_t s_fallback_used = 0;
-+        const uint64_t ARENA_SIZE = 32ULL << 20;
-+        uint64_t size = 0x230;
-+        pthread_mutex_lock(&s_fallback_lock);
-+        if (!s_fallback_arena) s_fallback_arena = (uint8_t *)hle_alloc(ARENA_SIZE);
-+        uint64_t cur = (uint64_t)(uintptr_t)(s_fallback_arena + s_fallback_used);
-+        uint64_t aligned = (cur + 15) & ~15ull;
-+        s_fallback_used = (aligned - (uint64_t)(uintptr_t)s_fallback_arena) + size;
-+        c->x[0] = aligned;
-+        memset((void *)(uintptr_t)c->x[0], 0, (size_t)size);
-+        pthread_mutex_unlock(&s_fallback_lock);
++        uint64_t sz = 0x230;
++        uint64_t align = 16;
++        void *p = dispatch_fallback_heap_alloc(sz, align);
++        c->x[0] = (uint64_t)(uintptr_t)p;
++        fprintf(stderr, "[totk] sead::Heap::alloc returned NULL -> fallback arena rescue %#llx (lr=%#llx)\n",
++                (unsigned long long)c->x[0], (unsigned long long)c->x[30]);
 +    }
 +}
 +
-+__attribute__((constructor)) static void install_heap_override(void) {
-+    hle_override(0x080006a920ull, hle_sead_heap_alloc_override, "sead::Heap::alloc");
++void __wrap_f_802bb74c0(Cpu *c) {
++    if (__real_f_802bb74c0) {
++        __real_f_802bb74c0(c);
++    } else {
++        c->x[0] = 0;
++    }
++    if (c->x[0] == 0 || c->x[0] < 0x10000ULL || c->x[0] >= (1ULL << 48)) {
++        static uint8_t s_default_heap[1024] __attribute__((aligned(64)));
++        c->x[0] = (uint64_t)(uintptr_t)s_default_heap;
++        fprintf(stderr, "[totk] sead::HeapMgr::getCurrentHeap returned NULL -> substituted fallback heap %#llx (lr=%#llx)\n",
++                (unsigned long long)c->x[0], (unsigned long long)c->x[30]);
++    }
 +}
++
++__attribute__((constructor)) static void install_heap_alloc_wrappers(void) {
++    hle_override(0x080006a920ull, __wrap_f_80006a920, "sead::Heap::alloc");
++    hle_override(0x0802bb74c0ull, __wrap_f_802bb74c0, "sead::HeapMgr::getCurrentHeap");
++}
+diff --git a/src/runtime/platform/linux.c b/src/runtime/platform/linux.c
+index f9bcedd..41211f2 100644
+--- a/src/runtime/platform/linux.c
++++ b/src/runtime/platform/linux.c
+@@ -168,6 +168,10 @@ const char *plat_symbol(uint64_t pc, uint64_t *offset) {
+ 
+ // Fatal error without a terminal: say so in a message box rather than vanishing (the details are in the log).
+ void plat_fatal_notice(void) {
++    const char *headless = getenv("TOTK_HEADLESS");
++    if (headless && *headless && strcmp(headless, "0") != 0) {
++        _exit(1);
++    }
+     if (!g_log_path[0]) return;
+     fflush(stderr);
+     char text[1200];
+@@ -214,6 +218,10 @@ static void crash_handler(int sig, siginfo_t *si, void *ctx) {
+     char what[32];
+     snprintf(what, sizeof what, "signal %d", sig);
+     rt_fault_report(what, fa, pc, lr);
++    const char *headless = getenv("TOTK_HEADLESS");
++    if (headless && *headless && strcmp(headless, "0") != 0) {
++        _exit(1);
++    }
+ }
+ 
+ void plat_crash_handler_install(void) {
+diff --git a/tools/build_game.py b/tools/build_game.py
+index 3d2ad1c..4bd45db 100644
+--- a/tools/build_game.py
++++ b/tools/build_game.py
+@@ -123,7 +123,7 @@ def main():
+         '  deps = gcc',
+         *([] if LINUX else ['rule rc', '  command = llvm-windres --target=pe-x86-64 -I . $in -o $out']),
+         'rule link',
+-        (f'  command = clang -g -o $out @$out.rsp {LIBS}' if LINUX else
++        (f'  command = clang -g -Wl,--wrap=f_80006a920 -Wl,--wrap=f_802bb74c0 -o $out @$out.rsp {LIBS}' if LINUX else
+          f'  command = clang -g -Wl,--pdb=$pdb -o $out @$out.rsp {LIBS}'),
+         '  rspfile = $out.rsp',
+         '  rspfile_content = $in',
