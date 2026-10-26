@@ -4,6 +4,7 @@
 #include "graphics/vk_pipeline_cache.h"
 #include "graphics/bnsh_parser.h"
 #include "graphics/nvn_bindless.h"
+#include "graphics/nvn_render_states.h"
 #include "graphics/nvn_vk.h"
 #include "graphics/hle_nvn_gen.h"
 #include <cassert>
@@ -531,6 +532,131 @@ void test_nvn_bindless_descriptor_pool() {
     std::printf("  -> NVN Bindless Descriptor Pool & Handle Manager: PASSED\n");
 }
 
+void test_nvn_render_state_tracker() {
+    std::printf("[Test] Running test_nvn_render_state_tracker...\n");
+    auto &state_mgr = totk::graphics::NvnRenderStateManager::instance();
+    state_mgr.reset();
+
+    uint64_t hash_default = state_mgr.compute_hash();
+    assert(hash_default != 0);
+
+    // 1. Blend State Binding
+    struct RawBlend {
+        uint64_t target : 3;
+        uint64_t src_rgb : 7;
+        uint64_t dst_rgb : 7;
+        uint64_t src_a : 7;
+        uint64_t dst_a : 7;
+        uint64_t eq_rgb : 3;
+        uint64_t eq_a : 3;
+    } raw_blend{};
+    raw_blend.target = 0;
+    raw_blend.src_rgb = 0x5; // SRC_ALPHA
+    raw_blend.dst_rgb = 0x6; // ONE_MINUS_SRC_ALPHA
+    raw_blend.src_a = 0x2;   // ONE
+    raw_blend.dst_a = 0x1;   // ZERO
+    raw_blend.eq_rgb = 0x1;  // ADD
+    raw_blend.eq_a = 0x1;    // ADD
+
+    using BindStateFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t);
+    auto *pfn_bind_blend = reinterpret_cast<BindStateFn>(totk::graphics::nvn_get_proc_address("nvnCommandBufferBindBlendState"));
+    assert(pfn_bind_blend != nullptr);
+    pfn_bind_blend(0, reinterpret_cast<uint64_t>(&raw_blend), 0, 0);
+
+    assert(state_mgr.get_bind_blend_count() == 1);
+    const auto &target0 = state_mgr.get_blend_target(0);
+    assert(target0.src_color_factor == VK_BLEND_FACTOR_SRC_ALPHA);
+    assert(target0.dst_color_factor == VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
+    assert(target0.color_blend_op == VK_BLEND_OP_ADD);
+    assert(target0.src_alpha_factor == VK_BLEND_FACTOR_ONE);
+    assert(target0.dst_alpha_factor == VK_BLEND_FACTOR_ZERO);
+
+    // 2. Channel Mask State Binding
+    uint32_t channel_mask = 0xF | (0x1 << 4); // Target 0 = RGBA (0xF), Target 1 = R only (0x1)
+    auto *pfn_bind_chmask = reinterpret_cast<BindStateFn>(totk::graphics::nvn_get_proc_address("nvnCommandBufferBindChannelMaskState"));
+    assert(pfn_bind_chmask != nullptr);
+    pfn_bind_chmask(0, reinterpret_cast<uint64_t>(&channel_mask), 0, 0);
+
+    assert(state_mgr.get_bind_channel_mask_count() == 1);
+    assert(state_mgr.get_blend_target(0).color_write_mask == (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT));
+    assert(state_mgr.get_blend_target(1).color_write_mask == VK_COLOR_COMPONENT_R_BIT);
+
+    // 3. Depth-Stencil State Binding
+    struct RawDS {
+        uint64_t dt : 1;
+        uint64_t dw : 1;
+        uint64_t df : 4;
+        uint64_t st : 1;
+        uint64_t sf_f : 4;
+        uint64_t sf_b : 4;
+        uint64_t fail_f : 4;
+        uint64_t zfail_f : 4;
+        uint64_t zpass_f : 4;
+        uint64_t fail_b : 4;
+        uint64_t zfail_b : 4;
+        uint64_t zpass_b : 4;
+    } raw_ds{};
+    raw_ds.dt = 1; // Depth test enable
+    raw_ds.dw = 1; // Depth write enable
+    raw_ds.df = 0x4; // LEQUAL (NVN_DEPTH_FUNC_LEQUAL)
+    raw_ds.st = 1; // Stencil test enable
+
+    auto *pfn_bind_ds = reinterpret_cast<BindStateFn>(totk::graphics::nvn_get_proc_address("nvnCommandBufferBindDepthStencilState"));
+    assert(pfn_bind_ds != nullptr);
+    pfn_bind_ds(0, reinterpret_cast<uint64_t>(&raw_ds), 0, 0);
+
+    assert(state_mgr.get_bind_depth_stencil_count() == 1);
+    assert(state_mgr.get_depth_stencil().depth_test_enable == true);
+    assert(state_mgr.get_depth_stencil().depth_write_enable == true);
+    assert(state_mgr.get_depth_stencil().depth_compare_op == VK_COMPARE_OP_LESS_OR_EQUAL);
+    assert(state_mgr.get_depth_stencil().stencil_test_enable == true);
+
+    // 4. Polygon State Binding
+    struct RawPoly {
+        uint32_t cull : 2;
+        uint32_t front : 1;
+        uint32_t mode : 2;
+        uint32_t offset_en : 3;
+    } raw_poly{};
+    raw_poly.cull = 0x2; // BACK
+    raw_poly.front = 0x1; // CCW
+    raw_poly.mode = 0x2; // FILL
+
+    auto *pfn_bind_poly = reinterpret_cast<BindStateFn>(totk::graphics::nvn_get_proc_address("nvnCommandBufferBindPolygonState"));
+    assert(pfn_bind_poly != nullptr);
+    pfn_bind_poly(0, reinterpret_cast<uint64_t>(&raw_poly), 0, 0);
+
+    assert(state_mgr.get_bind_polygon_count() == 1);
+    assert(state_mgr.get_rasterizer().cull_mode == VK_CULL_MODE_BACK_BIT);
+    assert(state_mgr.get_rasterizer().front_face == VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    assert(state_mgr.get_rasterizer().polygon_mode == VK_POLYGON_MODE_FILL);
+
+    // 5. Multisample State Binding
+    struct RawMS {
+        uint8_t enable, samples, a2c, a2c_dither, raster_samples, cov_mod, cov2color_en, cov2color_out, sl_en, sl_grid;
+    } raw_ms{};
+    raw_ms.enable = 1;
+    raw_ms.samples = 4;
+    raw_ms.a2c = 1;
+
+    auto *pfn_bind_ms = reinterpret_cast<BindStateFn>(totk::graphics::nvn_get_proc_address("nvnCommandBufferBindMultisampleState"));
+    assert(pfn_bind_ms != nullptr);
+    pfn_bind_ms(0, reinterpret_cast<uint64_t>(&raw_ms), 0, 0);
+
+    assert(state_mgr.get_bind_multisample_count() == 1);
+    assert(state_mgr.get_multisample().rasterization_samples == VK_SAMPLE_COUNT_4_BIT);
+    assert(state_mgr.get_multisample().alpha_to_coverage_enable == true);
+
+    // 6. Dynamic State Application (safe no-op with null cmd)
+    state_mgr.apply_dynamic_states(VK_NULL_HANDLE);
+
+    // 7. Verify State Hash updated
+    uint64_t hash_configured = state_mgr.compute_hash();
+    assert(hash_configured != hash_default);
+
+    std::printf("  -> NVN Render State Tracker (Blend, Depth-Stencil, Rasterizer, Mask, MSAA): PASSED\n");
+}
+
 int main() {
     std::printf("==================================================\n");
     std::printf("  NVN-to-Vulkan 1.3 Subsystems Unit Tests\n");
@@ -546,6 +672,7 @@ int main() {
     test_gameframework_render_loop_10_frames();
     test_bnsh_parsing_and_fallback_pipeline();
     test_nvn_bindless_descriptor_pool();
+    test_nvn_render_state_tracker();
 
     std::printf("\nAll NVN-to-Vulkan unit tests PASSED successfully!\n");
     return 0;

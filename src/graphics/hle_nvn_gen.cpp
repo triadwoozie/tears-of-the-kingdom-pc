@@ -10,6 +10,7 @@
 #include "graphics/nvn_texture_cache.h"
 #include "graphics/nvn_uniform_snapshot.h"
 #include "graphics/nvn_bindless.h"
+#include "graphics/nvn_render_states.h"
 #include "graphics/nvn_vk.h"
 
 namespace totk::graphics {
@@ -311,21 +312,24 @@ static uint64_t hle_nvnCommandBufferBeginTransformFeedback(uint64_t x0 = 0, uint
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferBindBlendState(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferBindBlendState(uint64_t cb = 0, uint64_t state = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnRenderStateManager::instance().bind_blend_state(reinterpret_cast<const void *>(state));
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferBindChannelMaskState(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferBindChannelMaskState(uint64_t cb = 0, uint64_t state = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnRenderStateManager::instance().bind_channel_mask_state(reinterpret_cast<const void *>(state));
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferBindColorState(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferBindColorState(uint64_t cb = 0, uint64_t state = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnRenderStateManager::instance().bind_color_state(reinterpret_cast<const void *>(state));
     return 0;
 }
 
@@ -335,9 +339,10 @@ static uint64_t hle_nvnCommandBufferBindCoverageModulationTable(uint64_t x0 = 0,
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferBindDepthStencilState(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferBindDepthStencilState(uint64_t cb = 0, uint64_t state = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnRenderStateManager::instance().bind_depth_stencil_state(reinterpret_cast<const void *>(state));
     return 0;
 }
 
@@ -353,15 +358,17 @@ static uint64_t hle_nvnCommandBufferBindImages(uint64_t x0 = 0, uint64_t x1 = 0,
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferBindMultisampleState(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferBindMultisampleState(uint64_t cb = 0, uint64_t state = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnRenderStateManager::instance().bind_multisample_state(reinterpret_cast<const void *>(state));
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferBindPolygonState(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferBindPolygonState(uint64_t cb = 0, uint64_t state = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnRenderStateManager::instance().bind_polygon_state(reinterpret_cast<const void *>(state));
     return 0;
 }
 
