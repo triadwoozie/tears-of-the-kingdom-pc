@@ -45,6 +45,8 @@ enum class TextureFormat {
     ASTC_12x12_SRGB = 0x94,
     BC1_RGBA_UNORM = 0x42,
     BC3_RGBA_UNORM = 0x44,
+    BC4_UNORM = 0x47,
+    BC5_UNORM = 0x49,
     BC7_UNORM = 0x4D,
     DEPTH24_STENCIL8 = 0x15,
     DEPTH32F = 0x16
@@ -97,6 +99,20 @@ struct CachedTexture {
     float render_scale = 1.0f;
 };
 
+struct NvnTextureViewInternal {
+    uint32_t set_levels : 1 = 0;
+    uint32_t set_layers : 1 = 0;
+    uint32_t set_format : 1 = 0;
+    uint32_t set_target : 1 = 0;
+    uint32_t base_level : 8 = 0;
+    uint32_t nlevels : 8 = 1;
+    uint32_t min_layer : 8 = 0;
+    uint32_t nlayers : 16 = 1;
+    uint32_t format : 16 = 0;
+    uint32_t target : 16 = 0;
+    uint32_t swizzle : 16 = 0;
+};
+
 class NvnTextureCache {
 public:
     explicit NvnTextureCache(VkDevice device = VK_NULL_HANDLE);
@@ -107,6 +123,7 @@ public:
 
     CachedTexture *get_or_create_texture(uint64_t guest_addr, uint32_t width, uint32_t height, TextureFormat fmt, bool is_rt = false);
     void decompress_astc_to_rgba8(const uint8_t *astc_in, uint8_t *rgba_out, uint32_t width, uint32_t height, uint32_t block_w = 4, uint32_t block_h = 4, bool is_srgb = false);
+    void decompress_bc_to_rgba8(TextureFormat fmt, const uint8_t *bc_in, uint8_t *rgba_out, uint32_t width, uint32_t height);
 
     size_t get_cached_count() const { return textures_.size(); }
 

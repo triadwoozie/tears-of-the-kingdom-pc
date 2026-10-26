@@ -557,6 +557,45 @@ void VulkanBackend::cmd_update_uniform_buffer(uint32_t stage, uint32_t slot, con
     (void)data;
 }
 
+void VulkanBackend::cmd_dispatch_compute(uint32_t group_x, uint32_t group_y, uint32_t group_z) {
+    rec_state_.recorded_dispatches++;
+    rec_state_.last_dispatch_x = group_x;
+    rec_state_.last_dispatch_y = group_y;
+    rec_state_.last_dispatch_z = group_z;
+    if (!is_mock_ && initialized_ && rec_state_.is_recording && !command_buffers_.empty()) {
+        VkCommandBuffer cmd = command_buffers_[current_frame_];
+        vkCmdDispatch(cmd, group_x, group_y, group_z);
+    }
+}
+
+void VulkanBackend::cmd_resolve_multisample_image(VkImage src_image, VkImage dst_image, uint32_t width, uint32_t height) {
+    rec_state_.recorded_resolves++;
+    if (!is_mock_ && initialized_ && rec_state_.is_recording && !command_buffers_.empty() &&
+        src_image != VK_NULL_HANDLE && dst_image != VK_NULL_HANDLE) {
+        VkCommandBuffer cmd = command_buffers_[current_frame_];
+
+        VkImageResolve resolve_region{};
+        resolve_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        resolve_region.srcSubresource.mipLevel = 0;
+        resolve_region.srcSubresource.baseArrayLayer = 0;
+        resolve_region.srcSubresource.layerCount = 1;
+        resolve_region.srcOffset = {0, 0, 0};
+
+        resolve_region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        resolve_region.dstSubresource.mipLevel = 0;
+        resolve_region.dstSubresource.baseArrayLayer = 0;
+        resolve_region.dstSubresource.layerCount = 1;
+        resolve_region.dstOffset = {0, 0, 0};
+
+        resolve_region.extent = {width, height, 1};
+
+        vkCmdResolveImage(cmd,
+                          src_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                          dst_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          1, &resolve_region);
+    }
+}
+
 void VulkanBackend::cmd_set_render_targets(uint32_t num_colors, const RenderTargetAttachment *color_targets, const RenderTargetAttachment *depth_target) {
     rec_state_.recorded_rt_binds++;
     rec_state_.last_rt_color_count = num_colors;

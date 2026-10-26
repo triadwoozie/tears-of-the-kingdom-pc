@@ -5,6 +5,8 @@
 #include "graphics/bnsh_parser.h"
 #include "graphics/nvn_bindless.h"
 #include "graphics/nvn_render_states.h"
+#include "graphics/bc_decoder.h"
+#include "graphics/nvn_texture_cache.h"
 #include "graphics/nvn_vk.h"
 #include "graphics/hle_nvn_gen.h"
 #include <cassert>
@@ -657,6 +659,153 @@ void test_nvn_render_state_tracker() {
     std::printf("  -> NVN Render State Tracker (Blend, Depth-Stencil, Rasterizer, Mask, MSAA): PASSED\n");
 }
 
+void test_compute_views_and_bc_decoders() {
+    std::printf("[Test] Running test_compute_views_and_bc_decoders...\n");
+
+    // 1. Compute Shader Dispatch & Multisample Resolve in Mock Backend
+    totk::graphics::VulkanBackend backend;
+    bool init_ok = backend.initialize_mock();
+    assert(init_ok);
+
+    backend.begin_command_recording();
+    backend.cmd_dispatch_compute(8, 4, 2);
+    assert(backend.get_recording_state().recorded_dispatches == 1);
+    assert(backend.get_recording_state().last_dispatch_x == 8);
+    assert(backend.get_recording_state().last_dispatch_y == 4);
+    assert(backend.get_recording_state().last_dispatch_z == 2);
+
+    backend.cmd_resolve_multisample_image(reinterpret_cast<VkImage>(0x100), reinterpret_cast<VkImage>(0x200), 1920, 1080);
+    assert(backend.get_recording_state().recorded_resolves == 1);
+
+    // Call compute dispatch via NVN HLE symbol
+    using DispatchFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    auto pfn_dispatch = reinterpret_cast<DispatchFn>(totk::graphics::nvn_get_proc_address("nvnCommandBufferDispatchCompute"));
+    assert(pfn_dispatch != nullptr);
+    pfn_dispatch(0, 16, 16, 1, 0, 0, 0, 0);
+    assert(backend.get_recording_state().recorded_dispatches == 2);
+    assert(backend.get_recording_state().last_dispatch_x == 16);
+    assert(backend.get_recording_state().last_dispatch_y == 16);
+    assert(backend.get_recording_state().last_dispatch_z == 1);
+
+    backend.end_command_recording();
+    backend.shutdown();
+
+    // 2. Texture View Internal configuration
+    totk::graphics::NvnTextureViewInternal view{};
+    using SetDefaultsFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    using SetLevelsFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    using SetLayersFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    using SetFormatFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    using SetSwizzleFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    using SetTargetFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+
+    auto pfn_view_defaults = reinterpret_cast<SetDefaultsFn>(totk::graphics::nvn_get_proc_address("nvnTextureViewSetDefaults"));
+    auto pfn_view_levels = reinterpret_cast<SetLevelsFn>(totk::graphics::nvn_get_proc_address("nvnTextureViewSetLevels"));
+    auto pfn_view_layers = reinterpret_cast<SetLayersFn>(totk::graphics::nvn_get_proc_address("nvnTextureViewSetLayers"));
+    auto pfn_view_format = reinterpret_cast<SetFormatFn>(totk::graphics::nvn_get_proc_address("nvnTextureViewSetFormat"));
+    auto pfn_view_swizzle = reinterpret_cast<SetSwizzleFn>(totk::graphics::nvn_get_proc_address("nvnTextureViewSetSwizzle"));
+    auto pfn_view_target = reinterpret_cast<SetTargetFn>(totk::graphics::nvn_get_proc_address("nvnTextureViewSetTarget"));
+
+    assert(pfn_view_defaults && pfn_view_levels && pfn_view_layers && pfn_view_format && pfn_view_swizzle && pfn_view_target);
+
+    pfn_view_defaults(reinterpret_cast<uint64_t>(&view), 0, 0, 0, 0, 0, 0, 0);
+    pfn_view_levels(reinterpret_cast<uint64_t>(&view), 2, 4, 0, 0, 0, 0, 0);
+    pfn_view_layers(reinterpret_cast<uint64_t>(&view), 1, 6, 0, 0, 0, 0, 0);
+    pfn_view_format(reinterpret_cast<uint64_t>(&view), 0x25, 0, 0, 0, 0, 0, 0);
+    pfn_view_swizzle(reinterpret_cast<uint64_t>(&view), 0, 1, 2, 3, 0, 0, 0);
+    pfn_view_target(reinterpret_cast<uint64_t>(&view), 3, 0, 0, 0, 0, 0, 0);
+
+    assert(view.set_levels == 1 && view.base_level == 2 && view.nlevels == 4);
+    assert(view.set_layers == 1 && view.min_layer == 1 && view.nlayers == 6);
+    assert(view.set_format == 1 && view.format == 0x25);
+    assert(view.set_target == 1 && view.target == 3);
+
+    // 3. BC Decoders (BC1, BC3, BC4, BC5, BC7)
+    // BC1 synthetic 4x4 block
+    // c0 = 0xF800 (Pure Red in RGB565: R=31, G=0, B=0)
+    // c1 = 0x001F (Pure Blue in RGB565: R=0, G=0, B=31)
+    // c0 > c1 (0xF800 > 0x001F)
+    // All indices 0 -> all 16 pixels are color0 (Red)
+    uint8_t bc1_block[8] = {
+        0x00, 0xF8, // c0 = 0xF800
+        0x1F, 0x00, // c1 = 0x001F
+        0x00, 0x00, 0x00, 0x00 // indices = 0
+    };
+    uint8_t rgba_out[4 * 4 * 4];
+    std::memset(rgba_out, 0, sizeof(rgba_out));
+    totk::graphics::BcDecoder::decode_bc1(bc1_block, 4, 4, rgba_out);
+
+    // Verify all 16 pixels are decoded to Red (R ~ 255, G = 0, B = 0, A = 255)
+    for (int p = 0; p < 16; ++p) {
+        assert(rgba_out[p * 4 + 0] >= 250); // Red
+        assert(rgba_out[p * 4 + 1] == 0);   // Green
+        assert(rgba_out[p * 4 + 2] == 0);   // Blue
+        assert(rgba_out[p * 4 + 3] == 255); // Alpha
+    }
+
+    // BC3 synthetic 4x4 block (8 bytes alpha + 8 bytes color)
+    uint8_t bc3_block[16];
+    std::memset(bc3_block, 0, sizeof(bc3_block));
+    bc3_block[0] = 200; // a0
+    bc3_block[1] = 50;  // a1
+    // alpha indices 0 -> all alpha = a0 = 200
+    bc3_block[8] = 0x00; bc3_block[9] = 0xF8; // Red color
+    std::memset(rgba_out, 0, sizeof(rgba_out));
+    totk::graphics::BcDecoder::decode_bc3(bc3_block, 4, 4, rgba_out);
+    assert(rgba_out[0] >= 250);
+    assert(rgba_out[3] == 200); // Alpha matches a0
+
+    // BC4 synthetic 4x4 block (8 bytes red channel)
+    uint8_t bc4_block[8];
+    std::memset(bc4_block, 0, sizeof(bc4_block));
+    bc4_block[0] = 180; // v0
+    bc4_block[1] = 40;  // v1
+    std::memset(rgba_out, 0, sizeof(rgba_out));
+    totk::graphics::BcDecoder::decode_bc4(bc4_block, 4, 4, rgba_out);
+    assert(rgba_out[0] == 180); // Red
+    assert(rgba_out[1] == 0);   // Green = 0
+    assert(rgba_out[2] == 0);   // Blue = 0
+    assert(rgba_out[3] == 255); // Alpha = 255
+
+    // BC5 synthetic 4x4 block (8 bytes red + 8 bytes green)
+    uint8_t bc5_block[16];
+    std::memset(bc5_block, 0, sizeof(bc5_block));
+    bc5_block[0] = 150; // R v0
+    bc5_block[8] = 220; // G v0
+    std::memset(rgba_out, 0, sizeof(rgba_out));
+    totk::graphics::BcDecoder::decode_bc5(bc5_block, 4, 4, rgba_out);
+    assert(rgba_out[0] == 150);
+    assert(rgba_out[1] == 220);
+    assert(rgba_out[2] == 0);
+    assert(rgba_out[3] == 255);
+
+    // BC7 basic decode test
+    uint8_t bc7_block[16];
+    std::memset(bc7_block, 0, sizeof(bc7_block));
+    bc7_block[0] = 0x01; // Mode 0
+    std::memset(rgba_out, 0, sizeof(rgba_out));
+    totk::graphics::BcDecoder::decode_bc7(bc7_block, 4, 4, rgba_out);
+    // Mode 0 decodes with alpha 255
+    assert(rgba_out[3] == 255);
+
+    // 4. Texture Cache integration test
+    totk::graphics::NvnTextureCache tex_cache(VK_NULL_HANDLE);
+    std::memset(rgba_out, 0, sizeof(rgba_out));
+    tex_cache.decompress_bc_to_rgba8(totk::graphics::TextureFormat::BC1_RGBA_UNORM, bc1_block, rgba_out, 4, 4);
+    assert(rgba_out[0] >= 250);
+    assert(rgba_out[3] == 255);
+
+    std::memset(rgba_out, 0, sizeof(rgba_out));
+    tex_cache.decompress_bc_to_rgba8(totk::graphics::TextureFormat::BC4_UNORM, bc4_block, rgba_out, 4, 4);
+    assert(rgba_out[0] == 180);
+
+    std::memset(rgba_out, 0, sizeof(rgba_out));
+    tex_cache.decompress_bc_to_rgba8(totk::graphics::TextureFormat::BC5_UNORM, bc5_block, rgba_out, 4, 4);
+    assert(rgba_out[0] == 150 && rgba_out[1] == 220);
+
+    std::printf("  -> Compute Dispatch, Texture Views & BC Decoders (BC1-BC7): PASSED\n");
+}
+
 int main() {
     std::printf("==================================================\n");
     std::printf("  NVN-to-Vulkan 1.3 Subsystems Unit Tests\n");
@@ -673,6 +822,7 @@ int main() {
     test_bnsh_parsing_and_fallback_pipeline();
     test_nvn_bindless_descriptor_pool();
     test_nvn_render_state_tracker();
+    test_compute_views_and_bc_decoders();
 
     std::printf("\nAll NVN-to-Vulkan unit tests PASSED successfully!\n");
     return 0;

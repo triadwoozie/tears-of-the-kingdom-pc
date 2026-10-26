@@ -80,6 +80,11 @@ struct CommandRecordingState {
     uint64_t recorded_flushes = 0;
     uint64_t recorded_presents = 0;
     uint64_t recorded_conditional_renders = 0;
+    uint64_t recorded_dispatches = 0;
+    uint32_t last_dispatch_x = 0;
+    uint32_t last_dispatch_y = 0;
+    uint32_t last_dispatch_z = 0;
+    uint64_t recorded_resolves = 0;
 };
 
 class VulkanBackend {
@@ -113,6 +118,12 @@ public:
     void cmd_clear_color(VkImage image, VkImageLayout layout, const VkClearColorValue *color, uint32_t range_count, const VkImageSubresourceRange *ranges);
     void cmd_bind_uniform_buffer(uint32_t stage, uint32_t slot, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize range);
     void cmd_update_uniform_buffer(uint32_t stage, uint32_t slot, const void *data, size_t size);
+
+    // Compute Shader Dispatching
+    void cmd_dispatch_compute(uint32_t group_x, uint32_t group_y, uint32_t group_z);
+
+    // Multisample Resolve
+    void cmd_resolve_multisample_image(VkImage src_image, VkImage dst_image, uint32_t width, uint32_t height);
 
     // Dynamic Render Target Allocation & Blit
     void cmd_set_render_targets(uint32_t num_colors, const RenderTargetAttachment *color_targets, const RenderTargetAttachment *depth_target = nullptr);

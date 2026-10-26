@@ -589,9 +589,12 @@ static uint64_t hle_nvnCommandBufferDiscardDepthStencil(uint64_t x0 = 0, uint64_
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferDispatchCompute(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferDispatchCompute(uint64_t cb = 0, uint64_t x = 0, uint64_t y = 0, uint64_t z = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->cmd_dispatch_compute(static_cast<uint32_t>(x), static_cast<uint32_t>(y), static_cast<uint32_t>(z));
+    }
     return 0;
 }
 
@@ -2788,45 +2791,67 @@ static uint64_t hle_nvnTextureViewGetTarget(uint64_t x0 = 0, uint64_t x1 = 0, ui
     return 0;
 }
 
-static uint64_t hle_nvnTextureViewSetDefaults(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnTextureViewSetDefaults(uint64_t v = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (v) std::memset(reinterpret_cast<void *>(v), 0, sizeof(NvnTextureViewInternal));
     return 0;
 }
 
-static uint64_t hle_nvnTextureViewSetDepthStencilMode(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnTextureViewSetDepthStencilMode(uint64_t v = 0, uint64_t mode = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)v; (void)mode; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
     return 0;
 }
 
-static uint64_t hle_nvnTextureViewSetFormat(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnTextureViewSetFormat(uint64_t v = 0, uint64_t format = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *view = reinterpret_cast<NvnTextureViewInternal *>(v)) {
+        view->set_format = 1;
+        view->format = static_cast<uint32_t>(format);
+    }
     return 0;
 }
 
-static uint64_t hle_nvnTextureViewSetLayers(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnTextureViewSetLayers(uint64_t v = 0, uint64_t min_layer = 0, uint64_t nlayers = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *view = reinterpret_cast<NvnTextureViewInternal *>(v)) {
+        view->set_layers = 1;
+        view->min_layer = static_cast<uint32_t>(min_layer);
+        view->nlayers = static_cast<uint32_t>(nlayers);
+    }
     return 0;
 }
 
-static uint64_t hle_nvnTextureViewSetLevels(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnTextureViewSetLevels(uint64_t v = 0, uint64_t base_level = 0, uint64_t nlevels = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *view = reinterpret_cast<NvnTextureViewInternal *>(v)) {
+        view->set_levels = 1;
+        view->base_level = static_cast<uint32_t>(base_level);
+        view->nlevels = static_cast<uint32_t>(nlevels);
+    }
     return 0;
 }
 
-static uint64_t hle_nvnTextureViewSetSwizzle(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
-                                uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+static uint64_t hle_nvnTextureViewSetSwizzle(uint64_t v = 0, uint64_t r = 0, uint64_t g = 0, uint64_t b = 0,
+                                uint64_t a = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
+    (void)x5; (void)x6; (void)x7;
+    if (auto *view = reinterpret_cast<NvnTextureViewInternal *>(v)) {
+        view->swizzle = static_cast<uint16_t>(0x8000 | (r & 0x7) | ((g & 0x7) << 3) | ((b & 0x7) << 6) | ((a & 0x7) << 9));
+    }
     return 0;
 }
 
-static uint64_t hle_nvnTextureViewSetTarget(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnTextureViewSetTarget(uint64_t v = 0, uint64_t target = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *view = reinterpret_cast<NvnTextureViewInternal *>(v)) {
+        view->set_target = 1;
+        view->target = static_cast<uint32_t>(target);
+    }
     return 0;
 }
 
