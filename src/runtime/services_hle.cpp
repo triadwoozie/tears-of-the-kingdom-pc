@@ -47,6 +47,11 @@ enum ServiceKind {
     KIND_ACCOUNT_MANAGER,
     KIND_HID,
     KIND_HID_APPLET_RESOURCE,
+    KIND_FILE,
+    KIND_DIRECTORY,
+    KIND_HWOPUS,
+    KIND_OPUS_DECODER,
+    KIND_PREPO,
 };
 
 static const char *s_kind_names[] = {
@@ -58,7 +63,7 @@ static const char *s_kind_names[] = {
     "audren:u", "audio-renderer", "audio-device", "save-filesystem",
     "vi:u", "nvdrv", "pctl", "pctl-service",
     "application-functions", "launch-storage", "launch-accessor", "account-manager",
-    "hid", "hid-applet-resource"
+    "hid", "hid-applet-resource", "file", "directory", "hwopus", "opus-decoder", "prepo:u"
 };
 
 struct SessionObject {
@@ -137,6 +142,10 @@ bool ServicesHLE::connect_port(const std::string &port_name, uint32_t *handle) {
     }
     if (port_name == "hid") {
         *handle = allocate_session(KIND_HID);
+        return true;
+    }
+    if (port_name == "hwopus") {
+        *handle = allocate_session(KIND_HWOPUS);
         return true;
     }
 
@@ -337,6 +346,8 @@ uint32_t ServicesHLE::dispatch_ipc(uint32_t handle, void *buffer, size_t size) {
 
                 ServiceKind target_kind = KIND_NONE;
                 if (name_str.rfind("fsp-srv", 0) == 0) target_kind = KIND_FS;
+                else if (name_str.rfind("hwopus", 0) == 0) target_kind = KIND_HWOPUS;
+                else if (name_str.rfind("prepo:u", 0) == 0) target_kind = KIND_PREPO;
                 else if (name_str.rfind("set", 0) == 0) target_kind = KIND_NONE; // fallback
                 else if (name_str.rfind("time:u", 0) == 0) target_kind = KIND_TIME;
                 else if (name_str.rfind("acc:u0", 0) == 0) target_kind = KIND_ACCOUNT;
@@ -543,15 +554,19 @@ uint32_t ServicesHLE::dispatch_ipc(uint32_t handle, void *buffer, size_t size) {
         }
 
         case KIND_FS: {
-            if (cmd_id == 1) {
+            if (cmd_id == 0 || cmd_id == 7 || cmd_id == 8 || cmd_id == 9) {
+                // OpenFileSystem / OpenFileSystemWithId / OpenFileSystemWithPatch
+                open_kind = KIND_SAVE_FS;
+                result_code = 0;
+            } else if (cmd_id == 1) {
                 // SetCurrentProcess
                 result_code = 0;
-            } else if (cmd_id == 11 || cmd_id == 200) {
-                // OpenRomFs / OpenDataStorageByCurrentProcess
+            } else if (cmd_id == 11 || cmd_id == 12 || cmd_id == 13 || cmd_id == 200 || cmd_id == 202) {
+                // OpenRomFs / OpenDataStorageByCurrentProcess / OpenDataStorageByProgramId
                 open_kind = KIND_ROM_STORAGE;
                 result_code = 0;
             } else if (cmd_id == 18 || cmd_id == 51) {
-                // OpenSaveDataFileSystem
+                // OpenSaveDataFileSystem / OpenSaveDataFileSystemBySystemSaveDataId
                 open_kind = KIND_SAVE_FS;
                 result_code = 0;
             } else if (cmd_id == 1005) {
@@ -572,9 +587,139 @@ uint32_t ServicesHLE::dispatch_ipc(uint32_t handle, void *buffer, size_t size) {
                 out_data_len = sizeof(romfs_sz);
                 result_code = 0;
             } else if (cmd_id == 0) {
-                // Read
+                // Read(s64 offset, s64 length)
+                uint64_t offset = 0, length = 0;
+                if (payload_len >= 16) {
+                    offset = *reinterpret_cast<const uint64_t *>(payload);
+                    length = *reinterpret_cast<const uint64_t *>(payload + 8);
+                }
+                (void)offset;
+                for (size_t d = 8; d + 12 <= aligned_cmif; d += 4) {
+                    uint32_t w0 = *reinterpret_cast<uint32_t *>(bytes + d);
+                    uint32_t w1 = *reinterpret_cast<uint32_t *>(bytes + d + 4);
+                    uint32_t w2 = *reinterpret_cast<uint32_t *>(bytes + d + 8);
+                    uint64_t blen = w0 | ((uint64_t)((w2 >> 24) & 15) << 32);
+                    uint64_t baddr = w1 | ((uint64_t)(w2 >> 28) << 32) | ((uint64_t)((w2 >> 2) & 0x3fffff) << 36);
+                    if (baddr >= 0x7000000000ULL && baddr < 0x7300000000ULL && blen > 0) {
+                        size_t copy_cnt = std::min(static_cast<size_t>(blen), static_cast<size_t>(length));
+                        std::memset(reinterpret_cast<void *>(baddr), 0, copy_cnt);
+                        break;
+                    }
+                }
                 result_code = 0;
             }
+            break;
+        }
+
+        case KIND_SAVE_FS: {
+            if (cmd_id == 0 || cmd_id == 1 || cmd_id == 2 || cmd_id == 3 ||
+                cmd_id == 4 || cmd_id == 5 || cmd_id == 6 || cmd_id == 7 || cmd_id == 11) {
+                // CreateFile, DeleteFile, CreateDirectory, DeleteDirectory, CleanDirectoryRecursively, Rename, Commit
+                result_code = 0;
+            } else if (cmd_id == 8) {
+                // GetEntryType -> File (2)
+                static uint32_t entry_type = 2;
+                out_data = &entry_type;
+                out_data_len = sizeof(entry_type);
+                result_code = 0;
+            } else if (cmd_id == 9) {
+                // OpenFile -> KIND_FILE
+                open_kind = KIND_FILE;
+                result_code = 0;
+            } else if (cmd_id == 10) {
+                // OpenDirectory -> KIND_DIRECTORY
+                open_kind = KIND_DIRECTORY;
+                result_code = 0;
+            } else if (cmd_id == 12 || cmd_id == 13) {
+                // GetFreeSpaceSize / GetTotalSpaceSize
+                static uint64_t space_sz = 100ULL * 1024 * 1024 * 1024; // 100 GiB
+                out_data = &space_sz;
+                out_data_len = sizeof(space_sz);
+                result_code = 0;
+            }
+            break;
+        }
+
+        case KIND_FILE: {
+            if (cmd_id == 0) {
+                // Read(u32 option, s64 offset, s64 size) -> s64 bytes_read
+                uint64_t offset = 0, length = 0;
+                if (payload_len >= 24) {
+                    offset = *reinterpret_cast<const uint64_t *>(payload + 8);
+                    length = *reinterpret_cast<const uint64_t *>(payload + 16);
+                } else if (payload_len >= 16) {
+                    offset = *reinterpret_cast<const uint64_t *>(payload);
+                    length = *reinterpret_cast<const uint64_t *>(payload + 8);
+                }
+                (void)offset;
+                uint64_t bytes_read = 0;
+                for (size_t d = 8; d + 12 <= aligned_cmif; d += 4) {
+                    uint32_t w0 = *reinterpret_cast<uint32_t *>(bytes + d);
+                    uint32_t w1 = *reinterpret_cast<uint32_t *>(bytes + d + 4);
+                    uint32_t w2 = *reinterpret_cast<uint32_t *>(bytes + d + 8);
+                    uint64_t blen = w0 | ((uint64_t)((w2 >> 24) & 15) << 32);
+                    uint64_t baddr = w1 | ((uint64_t)(w2 >> 28) << 32) | ((uint64_t)((w2 >> 2) & 0x3fffff) << 36);
+                    if (baddr >= 0x7000000000ULL && baddr < 0x7300000000ULL && blen > 0) {
+                        size_t copy_cnt = std::min(static_cast<size_t>(blen), static_cast<size_t>(length));
+                        std::memset(reinterpret_cast<void *>(baddr), 0, copy_cnt);
+                        bytes_read = copy_cnt;
+                        break;
+                    }
+                }
+                static uint64_t s_bytes_read_out = 0;
+                s_bytes_read_out = bytes_read;
+                out_data = &s_bytes_read_out;
+                out_data_len = sizeof(s_bytes_read_out);
+                result_code = 0;
+            } else if (cmd_id == 1 || cmd_id == 2 || cmd_id == 3 || cmd_id == 5) {
+                // Write, Flush, SetSize, OperateRange
+                result_code = 0;
+            } else if (cmd_id == 4) {
+                // GetSize -> 64 MiB
+                static uint64_t fsz = 64ULL * 1024 * 1024;
+                out_data = &fsz;
+                out_data_len = sizeof(fsz);
+                result_code = 0;
+            }
+            break;
+        }
+
+        case KIND_DIRECTORY: {
+            if (cmd_id == 0 || cmd_id == 1) {
+                // Read / GetEntryCount -> 0
+                static uint64_t zero_count = 0;
+                out_data = &zero_count;
+                out_data_len = sizeof(zero_count);
+                result_code = 0;
+            }
+            break;
+        }
+
+        case KIND_HWOPUS: {
+            if (cmd_id == 0 || cmd_id == 2) {
+                // OpenOpusDecoder / OpenOpusDecoderForMultiStream
+                open_kind = KIND_OPUS_DECODER;
+                result_code = 0;
+            } else if (cmd_id == 1 || cmd_id == 5 || cmd_id == 8) {
+                // GetOpusDecoderWorkBufferSize
+                static uint32_t work_sz = 16384;
+                out_data = &work_sz;
+                out_data_len = sizeof(work_sz);
+                result_code = 0;
+            }
+            break;
+        }
+
+        case KIND_OPUS_DECODER: {
+            if (cmd_id == 0 || cmd_id == 4) {
+                // DecodeInterleaved / ResetContext
+                result_code = 0;
+            }
+            break;
+        }
+
+        case KIND_PREPO: {
+            result_code = 0;
             break;
         }
 

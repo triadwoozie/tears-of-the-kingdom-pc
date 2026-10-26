@@ -295,6 +295,62 @@ void test_zstd_multi_dictionary_pack() {
     std::printf("  -> Zstandard Multi-Dictionary Pack Loading & Decompression: PASSED\n");
 }
 
+void test_filesystem_and_hwopus_ipc() {
+    std::printf("[Test] Running test_filesystem_and_hwopus_ipc...\n");
+
+    auto &services = totk::runtime::ServicesHLE::instance();
+    services.initialize();
+
+    // 1. Connect to hwopus service
+    uint32_t hwopus_h = 0;
+    bool hwopus_ok = services.connect_port("hwopus", &hwopus_h);
+    assert(hwopus_ok);
+    assert(hwopus_h != 0);
+
+    // Query work buffer size (cmd 1)
+    uint8_t ipc_buf[256]{};
+    *reinterpret_cast<uint32_t *>(ipc_buf) = 4 | (8 << 16);
+    *reinterpret_cast<uint32_t *>(ipc_buf + 0x10) = 0x49434653; // SFCI
+    *reinterpret_cast<uint32_t *>(ipc_buf + 0x18) = 1;          // GetOpusDecoderWorkBufferSize
+    uint32_t res = services.dispatch_ipc(hwopus_h, ipc_buf, sizeof(ipc_buf));
+    assert(res == totk::runtime::ResultSuccess);
+    // CMIF response data starts at 0x10 + 16 = 0x20
+    uint32_t work_sz = *reinterpret_cast<const uint32_t *>(ipc_buf + 0x20);
+    assert(work_sz == 16384);
+
+    // Open Opus Decoder (cmd 0)
+    std::memset(ipc_buf, 0, sizeof(ipc_buf));
+    *reinterpret_cast<uint32_t *>(ipc_buf) = 4 | (8 << 16);
+    *reinterpret_cast<uint32_t *>(ipc_buf + 0x10) = 0x49434653;
+    *reinterpret_cast<uint32_t *>(ipc_buf + 0x18) = 0; // OpenOpusDecoder
+    res = services.dispatch_ipc(hwopus_h, ipc_buf, sizeof(ipc_buf));
+    assert(res == totk::runtime::ResultSuccess);
+
+    // 2. FileSystem HLE IPC: fsp-srv
+    uint32_t fs_h = 0;
+    bool fs_ok = services.connect_port("fsp-srv", &fs_h);
+    assert(fs_ok);
+    assert(fs_h != 0);
+
+    // OpenRomFs (cmd 11)
+    std::memset(ipc_buf, 0, sizeof(ipc_buf));
+    *reinterpret_cast<uint32_t *>(ipc_buf) = 4 | (8 << 16);
+    *reinterpret_cast<uint32_t *>(ipc_buf + 0x10) = 0x49434653;
+    *reinterpret_cast<uint32_t *>(ipc_buf + 0x18) = 11;
+    res = services.dispatch_ipc(fs_h, ipc_buf, sizeof(ipc_buf));
+    assert(res == totk::runtime::ResultSuccess);
+
+    // OpenSaveDataFileSystem (cmd 18)
+    std::memset(ipc_buf, 0, sizeof(ipc_buf));
+    *reinterpret_cast<uint32_t *>(ipc_buf) = 4 | (8 << 16);
+    *reinterpret_cast<uint32_t *>(ipc_buf + 0x10) = 0x49434653;
+    *reinterpret_cast<uint32_t *>(ipc_buf + 0x18) = 18;
+    res = services.dispatch_ipc(fs_h, ipc_buf, sizeof(ipc_buf));
+    assert(res == totk::runtime::ResultSuccess);
+
+    std::printf("  -> FileSystem & HwOpus IPC Services: PASSED\n");
+}
+
 int main() {
     std::printf("=====================================================\n");
     std::printf("  TotK-Recomp: Unit Test - FileSystem & IPC\n");
@@ -305,6 +361,7 @@ int main() {
     test_zstd_decompression_and_transparent_romfs();
     test_sarc_archive_indexing();
     test_zstd_multi_dictionary_pack();
+    test_filesystem_and_hwopus_ipc();
 
     std::printf("\nAll FileSystem and IPC verification tests PASSED!\n");
     return 0;
