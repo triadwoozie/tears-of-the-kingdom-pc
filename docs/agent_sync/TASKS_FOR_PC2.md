@@ -49,3 +49,10 @@ PC-2 can consult the following reference repositories located in `reference_repo
 ## Task PC2-6: Fast RomFS SARC / Pack File Indexer [COMPLETED by PC-2]
 - **Target Files:** `src/runtime/filesystem_hle.cpp`, `src/runtime/filesystem_hle.h`, `tests/test_fs_ipc.cpp`
 - **Scope:** Completed. Full SARC table of contents parser (`SarcArchive`), SFAT hash lookup table (`sarc_hash`), SFNT string table resolver, zero-copy view and hash queries, synthetic archive builder (`create_archive`), and transparent nested RomFS resolution (`romfs:/Pack/*.pack/*` and `.sarc/*`) with transparent `.zs` decompressor integration. Unit tests verified in `tests/test_fs_ipc.cpp`.
+
+---
+
+## Task PC2-12: Investigate Iteration 184-185 Boot Abort and Filesystem Result
+- **Evidence:** After integrating `d8662ba`, two bounded `--boot-real` runs exit 139. Both logs report `[DIAG VAbortImpl]` with result `0x5299` (Module 153, Description 41), and show `fsp-srv` command 1005 near the failure. Guest PCs differ (`0x7104c91b54` and `0x710c0ce5d0`), so the immediate fault site is not yet identified.
+- **Scope:** Determine the meaning/source of result `0x5299`, inspect the command-1005 response and surrounding filesystem/archive flow, and establish whether either is causal. Add a focused regression test for the confirmed failure path.
+- **Constraints:** Do not suppress `VAbortImpl` or return success for unknown filesystem failures. Keep changes localized to the confirmed subsystem and preserve guest-visible error reporting.

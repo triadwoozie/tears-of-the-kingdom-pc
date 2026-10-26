@@ -50,3 +50,10 @@
 - **Local static analysis:** `tools/local_loop_scanner.py` found that `f_7104af51a4` follows the pointer at `+0x18` until it is null. This is a linked-list traversal, not evidence of a vsync, display, focus, or event wait. Both `0x7104bfe1b4` and `0x7104be5830` are return addresses in their callers, not function entries.
 - **Hook decision:** No speculative bypass hook was added; forcing a return could skip required container processing. The default `work/symbols.tsv` path is absent on this checkout; the scanner can use the already-fetched local `origin/symbol-table` object as a fallback.
 - **Graphics/archive handoff:** No new graphics, shader, or archive requirement was established by this trace, so no new PC-2 task was filed.
+
+### Post-PC-2 Integration Check - Iterations 184-185
+- **Integrated update:** Fetched and rebased PC-2 commit `d8662ba` (BNSH/fallback shader pipeline, GameFramework progression hooks, Zstd multi-dictionary support, and expanded ASTC support).
+- **Build/tests:** Reconfigured and rebuilt successfully with `ninja -C build -j 2`; all 10 CTests passed with two jobs.
+- **Boot regression:** Two bounded `--boot-real` runs exited 139 with a segmentation fault instead of reaching the 25-second timeout. Both logs contain `[DIAG VAbortImpl]` and result `0x5299` (Module 153, Description 41); the observed guest fault PCs differ (`0x7104c91b54` and `0x710c0ce5d0`).
+- **Filesystem evidence:** Both traces show `fsp-srv` command 1005 before the abort/fault, but the current logs do not prove that this command caused the failure. The first fault is after a guest heap-allocation dispatch; no root cause is confirmed.
+- **Handoff:** Added PC2-12 to investigate the result/command interaction, resolve the result code, and add a targeted regression test. No PC-2-owned source file was modified locally.
