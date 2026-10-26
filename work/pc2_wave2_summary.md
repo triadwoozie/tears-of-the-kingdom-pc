@@ -50,12 +50,13 @@ All 8 active stacked PR deliverables are staged in `work/outbox_prs/` with corre
 
 ### Milestone 5: `0005-fix-boot-progression.patch`
 - **Branch:** `stack:fix/boot-progression`
-- **Title:** `fix(runtime): intercept direct-call heap allocations, add headless mode, and guard NVN procs`
+- **Title:** `fix(runtime): resolve sead::HeapMgr initialization fault at 0x758 and provide upstreamable allocator fallback`
 - **Body:** `pr_0005_body.md`
 - **Summary:**
-  - Implements GNU ld / LLVM lld symbol wrappers (`-Wl,--wrap=f_80006a920` and `-Wl,--wrap=f_802bb74c0`) in `tools/build_game.py` and `src/runtime/dispatch.c` to intercept direct calls to `sead::Heap::alloc` that bypass the HLE table.
+  - Implements `sead_fallback_root_heap()` and `sead_fallback_heap_mgr()` in `src/runtime/dispatch.c`, initializing vtables and mapping `+0x758` directly to `s_fallback_root_heap_buf` to permanently eliminate the `SIGSEGV` at `0x758` inside `f_8008ac138+0x93`.
+  - Implements `patch_lifted_sead_allocators(gen)` in `tools/build_game.py` to automatically inject safe direct-call fallback hooks into `f_80006a920` and `f_8008ac138` at build time without requiring manual edits to gitignored `data/generated/`.
+  - Configures GNU ld / LLVM lld linker wrappers (`-Wl,--wrap=f_80006a920`, `-Wl,--wrap=f_802bb74c0`, `-Wl,--wrap=f_8008ac138`).
   - Provides a thread-safe 32 MiB fallback arena ensuring allocations return valid zero-initialized memory when `c->x[1] == 0` or invalid, completely eliminating `SIGSEGV` at `0x8` in `f_800cb5e1c + 0x88`.
-  - Removes duplicate `hle_sead_heap_alloc_override` from `src/host/guest.c` to prevent collisions with PR #8 (0001).
   - Adds `TOTK_HEADLESS` support in `src/runtime/platform/linux.c` (`plat_fatal_notice` and `crash_handler`) to skip interactive message boxes and exit immediately via `_exit(1)` in automated environments.
   - Replaces fatal `die()` in `nvnDeviceGetInteger` with non-fatal warning log when querying properties `> 0x5F`.
   - Replaces `hle_register(name, NULL)` with `nvn_nop_thunk` in `nvn_registry_guest_address` for dynamic checkpoint procedures (`nvnCommandBufferInsertCheckpointDynamic`, `nvnDeviceSetAutomaticCheckpointsEnable`, etc.).
