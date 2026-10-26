@@ -113,6 +113,7 @@ add_library(totk_recomp_graphics STATIC
     src/graphics/astc_decoder.cpp
     src/graphics/bnsh_parser.cpp
     src/graphics/maxwell_to_spirv.cpp
+    src/graphics/nvn_bindless.cpp
 )
 target_include_directories(totk_recomp_graphics PUBLIC
     src/

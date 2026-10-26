@@ -3,6 +3,7 @@
 #include "graphics/nvn_conditional_draw.h"
 #include "graphics/vk_pipeline_cache.h"
 #include "graphics/bnsh_parser.h"
+#include "graphics/nvn_bindless.h"
 #include "graphics/nvn_vk.h"
 #include "graphics/hle_nvn_gen.h"
 #include <cassert>
@@ -441,6 +442,95 @@ void test_bnsh_parsing_and_fallback_pipeline() {
     std::printf("  -> BNSH Header Parser & Fallback SPIR-V Pipeline: PASSED\n");
 }
 
+void test_nvn_bindless_descriptor_pool() {
+    std::printf("[Test] Running test_nvn_bindless_descriptor_pool...\n");
+    auto &mgr = totk::graphics::NvnBindlessManager::instance();
+    mgr.reset();
+
+    // 1. Test Handle Packing & Unpacking
+    uint32_t tex_id = 0x1234;
+    uint32_t samp_id = 0x567;
+    uint64_t handle = totk::graphics::NvnBindlessManager::pack_texture_handle(tex_id, samp_id);
+    assert(totk::graphics::NvnBindlessManager::unpack_texture_id(handle) == tex_id);
+    assert(totk::graphics::NvnBindlessManager::unpack_sampler_id(handle) == samp_id);
+
+    uint64_t tf_handle = totk::graphics::NvnBindlessManager::pack_texel_fetch_handle(tex_id);
+    assert(totk::graphics::NvnBindlessManager::unpack_texture_id(tf_handle) == tex_id);
+    assert(totk::graphics::NvnBindlessManager::unpack_sampler_id(tf_handle) == 0);
+
+    // 2. Test Pool Binding
+    uint64_t tex_pool_ptr = 0x7180000000ULL;
+    uint64_t samp_pool_ptr = 0x7180100000ULL;
+    mgr.bind_texture_pool(tex_pool_ptr, 0x1000, 256);
+    mgr.bind_sampler_pool(samp_pool_ptr, 0x2000, 64);
+    assert(mgr.get_bound_texture_pool() == tex_pool_ptr);
+    assert(mgr.get_bound_texture_offset() == 0x1000);
+    assert(mgr.get_bound_texture_size() == 256);
+    assert(mgr.get_bound_sampler_pool() == samp_pool_ptr);
+    assert(mgr.get_bound_sampler_offset() == 0x2000);
+    assert(mgr.get_bound_sampler_size() == 64);
+    assert(mgr.get_bind_texture_pool_count() == 1);
+    assert(mgr.get_bind_sampler_pool_count() == 1);
+
+    // 3. Test Registration
+    mgr.register_texture(10, 0x7190000000ULL, 0x7190000100ULL);
+    mgr.register_sampler(5, 0x7190000200ULL);
+    assert(mgr.get_registered_texture_count() == 1);
+    assert(mgr.get_registered_sampler_count() == 1);
+
+    const auto *tex_entry = mgr.get_texture(10);
+    assert(tex_entry != nullptr);
+    assert(tex_entry->nvn_texture_ptr == 0x7190000000ULL);
+    assert(tex_entry->nvn_view_ptr == 0x7190000100ULL);
+    assert(tex_entry->is_valid);
+
+    const auto *samp_entry = mgr.get_sampler(5);
+    assert(samp_entry != nullptr);
+    assert(samp_entry->nvn_sampler_ptr == 0x7190000200ULL);
+    assert(samp_entry->is_valid);
+
+    // 4. Test HLE symbol resolution and invocation
+    using GetTexHandleFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t);
+    using BindPoolFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t);
+    using RegTexFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+
+    auto *pfn_get_tex = reinterpret_cast<GetTexHandleFn>(totk::graphics::nvn_get_proc_address("nvnDeviceGetTextureHandle"));
+    auto *pfn_bind_tex_pool = reinterpret_cast<BindPoolFn>(totk::graphics::nvn_get_proc_address("nvnCommandBufferBindTexturePool"));
+    auto *pfn_bind_samp_pool = reinterpret_cast<BindPoolFn>(totk::graphics::nvn_get_proc_address("nvnCommandBufferBindSamplerPool"));
+    auto *pfn_reg_tex = reinterpret_cast<RegTexFn>(totk::graphics::nvn_get_proc_address("nvnTexturePoolRegisterTexture"));
+
+    assert(pfn_get_tex != nullptr);
+    assert(pfn_bind_tex_pool != nullptr);
+    assert(pfn_bind_samp_pool != nullptr);
+    assert(pfn_reg_tex != nullptr);
+
+    uint64_t res_handle = pfn_get_tex(0, 42, 7, 0);
+    assert(totk::graphics::NvnBindlessManager::unpack_texture_id(res_handle) == 42);
+    assert(totk::graphics::NvnBindlessManager::unpack_sampler_id(res_handle) == 7);
+    assert(mgr.get_handle_query_count() > 0);
+
+    pfn_bind_tex_pool(0, 0x7188000000ULL, 0, 0);
+    assert(mgr.get_bound_texture_pool() == 0x7188000000ULL);
+
+    pfn_bind_samp_pool(0, 0x7189000000ULL, 0, 0);
+    assert(mgr.get_bound_sampler_pool() == 0x7189000000ULL);
+
+    pfn_reg_tex(0x7188000000ULL, 99, 0x71A0000000ULL, 0x71A0000080ULL, 0);
+    assert(mgr.get_texture(99) != nullptr);
+    assert(mgr.get_texture(99)->nvn_texture_ptr == 0x71A0000000ULL);
+
+    // 5. Test Mock Vulkan Init and Command Bind
+    bool init_ok = mgr.initialize(VK_NULL_HANDLE);
+    assert(init_ok);
+    assert(mgr.is_initialized());
+    mgr.cmd_bind_bindless_set(VK_NULL_HANDLE, VK_NULL_HANDLE);
+
+    mgr.shutdown();
+    assert(!mgr.is_initialized());
+
+    std::printf("  -> NVN Bindless Descriptor Pool & Handle Manager: PASSED\n");
+}
+
 int main() {
     std::printf("==================================================\n");
     std::printf("  NVN-to-Vulkan 1.3 Subsystems Unit Tests\n");
@@ -455,6 +545,7 @@ int main() {
     test_queue_submission_and_synchronization();
     test_gameframework_render_loop_10_frames();
     test_bnsh_parsing_and_fallback_pipeline();
+    test_nvn_bindless_descriptor_pool();
 
     std::printf("\nAll NVN-to-Vulkan unit tests PASSED successfully!\n");
     return 0;

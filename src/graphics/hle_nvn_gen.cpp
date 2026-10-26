@@ -9,6 +9,7 @@
 #include "graphics/nvn_conditional_draw.h"
 #include "graphics/nvn_texture_cache.h"
 #include "graphics/nvn_uniform_snapshot.h"
+#include "graphics/nvn_bindless.h"
 #include "graphics/nvn_vk.h"
 
 namespace totk::graphics {
@@ -1042,9 +1043,10 @@ static uint64_t hle_nvnCommandBufferSetSampleMask(uint64_t x0 = 0, uint64_t x1 =
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferSetSamplerPool(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferSetSamplerPool(uint64_t cb = 0, uint64_t pool = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().bind_sampler_pool(pool);
     return 0;
 }
 
@@ -1094,9 +1096,10 @@ static uint64_t hle_nvnCommandBufferSetSubpixelPrecisionBias(uint64_t x0 = 0, ui
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferSetTexturePool(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferSetTexturePool(uint64_t cb = 0, uint64_t pool = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().bind_texture_pool(pool);
     return 0;
 }
 
@@ -1319,28 +1322,32 @@ static uint64_t hle_nvnDeviceGetProcAddress(uint64_t x0 = 0, uint64_t x1 = 0, ui
     return reinterpret_cast<uint64_t>(fn);
 }
 
-static uint64_t hle_nvnDeviceGetSeparateSamplerHandle(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnDeviceGetSeparateSamplerHandle(uint64_t dev = 0, uint64_t sampler_id = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    (void)dev; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().increment_handle_query_count();
+    return NvnBindlessManager::pack_sampler_handle(static_cast<uint32_t>(sampler_id));
 }
 
-static uint64_t hle_nvnDeviceGetSeparateTextureHandle(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnDeviceGetSeparateTextureHandle(uint64_t dev = 0, uint64_t texture_id = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    (void)dev; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().increment_handle_query_count();
+    return NvnBindlessManager::pack_texel_fetch_handle(static_cast<uint32_t>(texture_id));
 }
 
-static uint64_t hle_nvnDeviceGetTexelFetchHandle(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnDeviceGetTexelFetchHandle(uint64_t dev = 0, uint64_t texture_id = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    (void)dev; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().increment_handle_query_count();
+    return NvnBindlessManager::pack_texel_fetch_handle(static_cast<uint32_t>(texture_id));
 }
 
-static uint64_t hle_nvnDeviceGetTextureHandle(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnDeviceGetTextureHandle(uint64_t dev = 0, uint64_t texture_id = 0, uint64_t sampler_id = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    (void)dev; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().increment_handle_query_count();
+    return NvnBindlessManager::pack_texture_handle(static_cast<uint32_t>(texture_id), static_cast<uint32_t>(sampler_id));
 }
 
 static uint64_t hle_nvnDeviceGetTimestampInNanoseconds(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
@@ -2215,15 +2222,17 @@ static uint64_t hle_nvnSamplerPoolInitialize(uint64_t x0 = 0, uint64_t x1 = 0, u
     return 1; // NVNboolean true
 }
 
-static uint64_t hle_nvnSamplerPoolRegisterSampler(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerPoolRegisterSampler(uint64_t pool = 0, uint64_t id = 0, uint64_t sampler = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)pool; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().register_sampler(static_cast<uint32_t>(id), sampler);
     return 0;
 }
 
-static uint64_t hle_nvnSamplerPoolRegisterSamplerBuilder(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerPoolRegisterSamplerBuilder(uint64_t pool = 0, uint64_t id = 0, uint64_t builder = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)pool; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().register_sampler(static_cast<uint32_t>(id), builder);
     return 0;
 }
 
@@ -2692,15 +2701,17 @@ static uint64_t hle_nvnTexturePoolInitialize(uint64_t x0 = 0, uint64_t x1 = 0, u
     return 1; // NVNboolean true
 }
 
-static uint64_t hle_nvnTexturePoolRegisterImage(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnTexturePoolRegisterImage(uint64_t pool = 0, uint64_t id = 0, uint64_t texture = 0, uint64_t view = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)pool; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().register_texture(static_cast<uint32_t>(id), texture, view);
     return 0;
 }
 
-static uint64_t hle_nvnTexturePoolRegisterTexture(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnTexturePoolRegisterTexture(uint64_t pool = 0, uint64_t id = 0, uint64_t texture = 0, uint64_t view = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)pool; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().register_texture(static_cast<uint32_t>(id), texture, view);
     return 0;
 }
 
@@ -3208,6 +3219,8 @@ void *nvn_get_proc_address(const char *name) {
         {"nvnCommandBufferSetRenderEnableConditional", reinterpret_cast<void *>(&hle_nvnCommandBufferSetRenderEnableConditional)},
         {"nvnCommandBufferSetRenderTargets", reinterpret_cast<void *>(&hle_nvnCommandBufferSetRenderTargets)},
         {"nvnCommandBufferSetSampleMask", reinterpret_cast<void *>(&hle_nvnCommandBufferSetSampleMask)},
+        {"nvnCommandBufferBindSamplerPool", reinterpret_cast<void *>(&hle_nvnCommandBufferSetSamplerPool)},
+        {"nvnCommandBufferBindTexturePool", reinterpret_cast<void *>(&hle_nvnCommandBufferSetTexturePool)},
         {"nvnCommandBufferSetSamplerPool", reinterpret_cast<void *>(&hle_nvnCommandBufferSetSamplerPool)},
         {"nvnCommandBufferSetScissor", reinterpret_cast<void *>(&hle_nvnCommandBufferSetScissor)},
         {"nvnCommandBufferSetScissors", reinterpret_cast<void *>(&hle_nvnCommandBufferSetScissors)},
@@ -3252,6 +3265,7 @@ void *nvn_get_proc_address(const char *name) {
         {"nvnDeviceGetImageHandle", reinterpret_cast<void *>(&hle_nvnDeviceGetImageHandle)},
         {"nvnDeviceGetInteger", reinterpret_cast<void *>(&hle_nvnDeviceGetInteger)},
         {"nvnDeviceGetProcAddress", reinterpret_cast<void *>(&hle_nvnDeviceGetProcAddress)},
+        {"nvnDeviceGetSamplerHandle", reinterpret_cast<void *>(&hle_nvnDeviceGetSeparateSamplerHandle)},
         {"nvnDeviceGetSeparateSamplerHandle", reinterpret_cast<void *>(&hle_nvnDeviceGetSeparateSamplerHandle)},
         {"nvnDeviceGetSeparateTextureHandle", reinterpret_cast<void *>(&hle_nvnDeviceGetSeparateTextureHandle)},
         {"nvnDeviceGetTexelFetchHandle", reinterpret_cast<void *>(&hle_nvnDeviceGetTexelFetchHandle)},
