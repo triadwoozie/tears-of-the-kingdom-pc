@@ -18,6 +18,7 @@ public:
 
     void *get_guest_base() const { return guest_base_; }
     size_t get_guest_size() const { return GUEST_MEMORY_SIZE; }
+    bool has_underflow_guard() const { return underflow_guard_ != nullptr; }
 
     bool is_in_guest_range(uint64_t addr) const {
         return addr >= GUEST_MEMORY_BASE && addr < GUEST_MEMORY_LIMIT;
@@ -35,6 +36,7 @@ private:
     ~MemoryManager();
 
     void *guest_base_ = nullptr;
+    void *underflow_guard_ = nullptr;
     bool write_tracking_enabled_ = false;
     int uffd_fd_ = -1;
     int pagemap_fd_ = -1;

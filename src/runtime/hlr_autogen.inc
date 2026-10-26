@@ -91,9 +91,9 @@ static void hlr_sead_resource_load(totk::recompiler::Arm64Context *context) {
 
     std::vector<uint8_t> data;
     if (!totk::runtime::FileSystemHLE::instance().read_romfs_file(path, 0, 0, data)) {
-        std::fprintf(stderr, "[HLR ResourceMgr] RomFS load failed for '%s' (LR=0x%llx)\n",
+        std::fprintf(stderr, "[HLR ResourceMgr] RomFS load failed for '%s'; using safe resource fallback (LR=0x%llx)\n",
                      path.c_str(), static_cast<unsigned long long>(return_address));
-        context->x[0] = 0;
+        context->x[0] = get_dummy_sead_resource();
         context->pc = return_address;
         return;
     }
@@ -103,6 +103,6 @@ static void hlr_sead_resource_load(totk::recompiler::Arm64Context *context) {
         std::fprintf(stderr, "[HLR ResourceMgr] Resource too large: '%s' (%zu bytes)\n",
                      path.c_str(), data.size());
     }
-    context->x[0] = resource;
+    context->x[0] = resource != 0 ? resource : get_dummy_sead_resource();
     context->pc = return_address;
 }

@@ -16,6 +16,10 @@
 
 namespace totk::runtime {
 
+namespace {
+constexpr size_t kGuestUnderflowGuardSize = 0x1000;
+}
+
 MemoryManager &MemoryManager::instance() {
     static MemoryManager mgr;
     return mgr;
@@ -47,6 +51,13 @@ bool MemoryManager::initialize() {
         }
     }
     guest_base_ = ptr;
+    void *guard = mmap(reinterpret_cast<void *>(GUEST_MEMORY_BASE - kGuestUnderflowGuardSize),
+                       kGuestUnderflowGuardSize, PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
+    if (guard == reinterpret_cast<void *>(GUEST_MEMORY_BASE - kGuestUnderflowGuardSize)) {
+        underflow_guard_ = guard;
+        std::printf("[MemoryManager] Reserved zeroed guest underflow guard page at %p\n", guard);
+    }
 #elif defined(_WIN32)
     void *ptr = VirtualAlloc(reinterpret_cast<void *>(GUEST_MEMORY_BASE), GUEST_MEMORY_SIZE,
                              MEM_RESERVE | MEM_WRITE_WATCH, PAGE_READWRITE);
@@ -55,6 +66,9 @@ bool MemoryManager::initialize() {
         return false;
     }
     guest_base_ = ptr;
+    underflow_guard_ = VirtualAlloc(
+        reinterpret_cast<void *>(GUEST_MEMORY_BASE - kGuestUnderflowGuardSize),
+        kGuestUnderflowGuardSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 #endif
 
     std::printf("[MemoryManager] Reserved 39-bit guest memory window: [0x%016llx - 0x%016llx] (%.1f GiB)\n",
@@ -69,13 +83,16 @@ void MemoryManager::shutdown() {
 
 #if defined(__linux__)
     munmap(guest_base_, GUEST_MEMORY_SIZE);
+    if (underflow_guard_) munmap(underflow_guard_, kGuestUnderflowGuardSize);
     if (uffd_fd_ >= 0) close(uffd_fd_);
     if (pagemap_fd_ >= 0) close(pagemap_fd_);
 #elif defined(_WIN32)
     VirtualFree(guest_base_, 0, MEM_RELEASE);
+    if (underflow_guard_) VirtualFree(underflow_guard_, 0, MEM_RELEASE);
 #endif
 
     guest_base_ = nullptr;
+    underflow_guard_ = nullptr;
 }
 
 bool MemoryManager::commit(uint64_t addr, size_t size) {

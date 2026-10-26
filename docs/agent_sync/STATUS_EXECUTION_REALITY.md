@@ -62,3 +62,20 @@ bindings.
 - The backend target and display-vsync event initialization were reached. The
   trace contains no evidence that the RenderBuffer hook advanced into command
   recording or that a frame was rendered.
+
+## Guest Underflow Guard Follow-up
+
+**Observed:** 2026-10-26, after the bounded ResourceMgr fallback and guest
+address underflow guard changes.
+
+- The earlier fault address, `0x6fffffffe0`, was 0x20 bytes below the guest
+  memory base (`0x7000000000`). This is not an `acc:u0`/HID output-buffer or
+  Vulkan null-device fault. The trace shows the fault while guest code was
+  traversing a missing UI resource after ResourceMgr had returned null.
+- Missing RomFS resources now return the initialized safe SEAD resource rather
+  than a null pointer. Guest memory also reserves a zeroed page immediately
+  below its base for small underflowing reads/writes.
+- The next 20-second headless run reached the timeout (exit 124) without the
+  previous SIGSEGV. Its tail was dominated by repeated audio-renderer IPC
+  commands; this verifies survival past the prior crash, not successful
+  resource loading or a rendered frame. `work/romfs` is still absent.
