@@ -112,6 +112,7 @@ add_library(totk_recomp_graphics STATIC
     src/graphics/nvn_texture_cache.cpp
     src/graphics/astc_decoder.cpp
     src/graphics/bnsh_parser.cpp
+    src/graphics/maxwell_to_spirv.cpp
 )
 target_include_directories(totk_recomp_graphics PUBLIC
     src/
@@ -203,3 +204,4 @@ add_totk_test(test_module_loader tests/test_module_loader.cpp)
 add_totk_test(test_fs_ipc tests/test_fs_ipc.cpp)
 add_totk_test(test_astc_decoder tests/test_astc_decoder.cpp)
 add_totk_test(test_ui_config tests/test_ui_config.cpp)
+add_totk_test(test_maxwell_spirv tests/test_maxwell_spirv.cpp)
