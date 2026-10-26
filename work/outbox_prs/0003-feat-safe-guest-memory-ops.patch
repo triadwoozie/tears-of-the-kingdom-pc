@@ -1,0 +1,75 @@
+diff --git a/src/runtime/dispatch.c b/src/runtime/dispatch.c
+index 50de728..fe93000 100644
+--- a/src/runtime/dispatch.c
++++ b/src/runtime/dispatch.c
+@@ -114,12 +114,64 @@ void *hle_alloc(uint64_t size) {
+     return (void *)a;
+ }
+ 
+-void dispatch_init(void) {
+-    const uint64_t *addrs[] = {main_fn_addrs, subsdk0_fn_addrs, sdk_fn_addrs};
+-    const GuestFn *fns[] = {main_fn_ptrs, subsdk0_fn_ptrs, sdk_fn_ptrs};
+-    uint64_t counts[] = {main_fn_count, subsdk0_fn_count, sdk_fn_count};
+-    for (int t = 0; t < MAX_MODULES; t++)
+-        tables[t] = (FnTable){addrs[t], fns[t], counts[t], addrs[t][0], addrs[t][counts[t] - 1]};
++static inline bool is_valid_guest_range(uint64_t addr, uint64_t size) {
++    if (!addr || !size) return true;
++    if (size > (2ULL << 30)) return false;  // > 2 GiB is invalid/overflow
++    if (addr < 0x10000ULL) return false;    // Near-null / unmapped lower 64 KiB
++    if (addr + size < addr) return false;   // Arithmetic overflow
++    return true;
++}
++
++static void safe_memcpy_impl(Cpu *c) {
++    uint64_t dst = c->x[0];
++    uint64_t src = c->x[1];
++    uint64_t size = c->x[2];
++    if (size == 0) return;
++    if (!is_valid_guest_range(dst, size) || !is_valid_guest_range(src, size)) {
++        static int warned = 0;
++        if (warned < 10) {
++            fprintf(stderr, "[totk] WARNING: safe_memcpy blocked invalid memory op: dst=%#llx src=%#llx size=%#llx (lr=%#llx)\n",
++                    (unsigned long long)dst, (unsigned long long)src, (unsigned long long)size, (unsigned long long)c->x[30]);
++            warned++;
++        }
++        return;
++    }
++    memmove((void *)(uintptr_t)dst, (const void *)(uintptr_t)src, (size_t)size);
++}
++
++static void safe_memset_impl(Cpu *c) {
++    uint64_t dst = c->x[0];
++    int val = (int)(c->x[1] & 0xFF);
++    uint64_t size = c->x[2];
++    if (size == 0) return;
++    if (!is_valid_guest_range(dst, size)) {
++        static int warned = 0;
++        if (warned < 10) {
++            fprintf(stderr, "[totk] WARNING: safe_memset blocked invalid memory op: dst=%#llx val=%d size=%#llx (lr=%#llx)\n",
++                    (unsigned long long)dst, val, (unsigned long long)size, (unsigned long long)c->x[30]);
++            warned++;
++        }
++        return;
++    }
++    memset((void *)(uintptr_t)dst, val, (size_t)size);
++}
++
++HLE_FUNC("memcpy", hle_memcpy) { safe_memcpy_impl(c); }
++HLE_FUNC("memmove", hle_memmove) { safe_memcpy_impl(c); }
++HLE_FUNC("__memmove_fast", hle_memmove_fast) { safe_memcpy_impl(c); }
++HLE_FUNC("__memmove_device", hle_memmove_device) { safe_memcpy_impl(c); }
++HLE_FUNC("memset", hle_memset) { safe_memset_impl(c); }
++
++void dispatch_init(void) {
++    const uint64_t *addrs[] = {main_fn_addrs, subsdk0_fn_addrs, sdk_fn_addrs};
++    const GuestFn *fns[] = {main_fn_ptrs, subsdk0_fn_ptrs, sdk_fn_ptrs};
++    uint64_t counts[] = {main_fn_count, subsdk0_fn_count, sdk_fn_count};
++    for (int t = 0; t < MAX_MODULES; t++)
++        tables[t] = (FnTable){addrs[t], fns[t], counts[t], addrs[t][0], addrs[t][counts[t] - 1]};
++
++    // Override guest memcpy PLT / SDK runtime entry points
++    hle_override(0x710c5b23c0ull, safe_memcpy_impl, "memcpy_sdk");
++    hle_override(0x7106bb7bd0ull, safe_memcpy_impl, "memcpy_plt");
+ }
+ 
+ GuestFn dispatch_lookup(uint64_t addr) {
