@@ -2030,6 +2030,24 @@ void register_sead_hlr_hooks() {
     hook_memset(0x710c5840b0ULL); // sdk memset
     hook_memset(0x7106bb7b80ULL); // main PLT memset
 
+    auto hook_memcpy = [](uint64_t addr) {
+        totk::recompiler::register_recompiled_func(addr, [](Arm64Context *c) {
+            uint64_t dst = c->x[0];
+            uint64_t src = c->x[1];
+            uint64_t n = c->x[2];
+            auto &memory = totk::runtime::MemoryManager::instance();
+            if (n > 0 && is_mapped_guest_range(memory, dst, n) &&
+                is_mapped_guest_range(memory, src, n)) {
+                std::memmove(reinterpret_cast<void *>(dst),
+                             reinterpret_cast<const void *>(src), n);
+            }
+            c->x[0] = dst;
+            c->pc = c->x[30];
+        });
+    };
+    hook_memcpy(0x710c5b23c0ULL); // sdk memcpy
+    hook_memcpy(0x7106bb7bd0ULL); // main PLT memcpy
+
     // Guard f_7104b4f180 (allocator block reset / setup)
     totk::recompiler::register_recompiled_func(0x7104b4f180ULL, [](Arm64Context *c) {
         uint64_t obj = c->x[0];
