@@ -7,12 +7,13 @@ This pull request resolves a critical boot crash (`SIGSEGV` at `0x00000000000000
 - **Fix**: Recorded parent CPU's `tpidrro` and `tpidr` upon `svcCreateThread`, and in `thread_main` copied the 128-byte TLS slot window (`+0x100` to `+0x180`) from the parent thread into the newly allocated guest TLS block. Restored `c->tpidr = t->parent_tpidr`.
 
 #### 2. Relax `svcSetHeapSize` Alignment & Expand Pool Limit (`src/host/svc.c`)
-- **Problem**: `svcSetHeapSize` enforced strict 2 MiB alignment (`size % 0x200000`) and checked against a retail Switch memory pool of 3.2 GiB (`APP_POOL = 0xcd500000ULL`), returning `0xd401` on standard page-aligned 4 KiB requests.
-- **Fix**: Relaxed alignment validation from 2 MiB to page alignment `(size & 4095) != 0`, and expanded `APP_POOL` to `(6ULL << 30)` (6 GiB) to accommodate full game heap reservations on 64-bit desktop hosts.
+- **Problem**: Startup requests a 4.87 GiB heap (`x1 = 0x137e00000`), larger than the old 4 GiB heap cap and 3.2 GiB application pool.
+- **Fix**: `APP_POOL` is 6 GiB, while `HEAP_CAP` is derived from the actual 5.25 GiB heap span remaining after the 768 MiB stack/layout reservation. The SVC accepts 4 KiB alignment, rejects sizes with overflow-safe pool checks, and treats a zero-size request as a successful heap reset, returning `HEAP_START` in `x1`.
 
 #### 3. Defensive Fallback Arena for `sead::Heap::alloc` (`src/host/guest.c`)
 - **Fix**: Added an HLE override interceptor on `0x080006a920ull` (`sead::Heap::alloc`). In the event that an unattached thread or unit invocation requests allocation with `c->x[1] == 0`, a thread-safe 32 MiB fallback arena services the request and returns a valid zero-initialized memory region rather than returning NULL and faulting the process.
 
 ### Verification
-- Tested with Clang 18 on Linux (`x86_64`).
-- Validated patch application with `--whitespace=error-all`.
+- Built with Ninja on Linux (`x86_64`).
+- Traced `svcSetHeapSize`: the 4.87 GiB startup request succeeds, `nninitStartup` returns, module constructors complete, and NVN creates its swapchain. A later null-heap crash at `f_800cb5e1c+0x88` remains under investigation.
+- Validated patch application with `git apply --check`.

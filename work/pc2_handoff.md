@@ -13,6 +13,23 @@
 `f_805143c60`, is `0`. The allocation returns `c->x[0] = 0`, and the caller
 faults writing at `ST8(c->x[0] + 0x8, 0u)`.
 
+## Heap-size verification update
+
+The traced `svcSetHeapSize` call is SVC `0x01` at `0x805175598`, with
+`x1 = 0x137e00000` (about 4.87 GiB). `plat_reserve_guest()` reserves the
+480-GiB `[GUEST_LO, GUEST_HI)` virtual window. The low-memory layout reserves
+6 GiB total, with the heap beginning 768 MiB into that region, leaving a
+5.25-GiB heap span. The SVC now advertises a 6-GiB `APP_POOL`, caps the heap at
+that actual 5.25-GiB span, accepts 4-KiB-aligned requests, checks the pool
+without integer overflow, and handles a zero-size request by resetting the
+heap and returning success plus `HEAP_START`.
+
+The latest trace shows this request succeeds: `nninitStartup` returns, all
+three module constructors complete, and NVN initializes a 1920x1080
+two-image swapchain. The prior null-heap `SIGSEGV` at `f_800cb5e1c+0x88`
+still occurs later; these SVC changes unblock startup but do not resolve that
+separate crash.
+
 Function-to-file index (function bodies are not copied into this bridge):
 
 - `f_800cb5e1c`: `data/generated/main/main_554.c`
