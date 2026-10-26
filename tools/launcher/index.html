@@ -1,181 +1,205 @@
 <!doctype html>
-<html lang="en" data-theme="zonai-dark">
+<html lang="en" data-theme="sky-island-dark">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>UltraTears Launcher - Tears of the Kingdom Recomp</title>
+    <title>The Legend of Zelda: Tears of the Kingdom — Native Launcher</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body class="bg-base-100 text-base-content min-h-screen flex flex-col font-sans select-none overflow-x-hidden">
-    <!-- Top Navbar -->
-    <header class="navbar bg-base-200 border-b border-base-300 px-6 sticky top-0 z-50 shadow-md">
+
+    <!-- Top Navigation Bar -->
+    <header class="navbar bg-base-200 border-b border-[#DCD09F]/15 px-6 sticky top-0 z-50 shadow-lg">
       <div class="navbar-start flex items-center gap-3">
-        <div class="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/40 text-primary">
+        <!-- Zonai Crest Icon -->
+        <div class="w-9 h-9 rounded-sm bg-[#12582C]/50 flex items-center justify-center border border-[#D08D1C]/60 text-[#D08D1C] shadow-inner">
           <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24">
-            <path d="M12 2L4 7v10l8 5 8-5V7l-8-5zm0 2.2l6 3.75v7.6L12 19.3l-6-3.75v-7.6l6-3.75z"/>
-            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 2L4 7v10l8 5 8-5V7l-8-5zm0 2.4l6 3.6v7.2L12 18.8l-6-3.6V8l6-3.6z"/>
+            <polygon points="12,7 16,14 8,14"/>
+            <circle cx="12" cy="12" r="1.5"/>
           </svg>
         </div>
         <div class="flex flex-col">
-          <span class="font-bold text-lg tracking-wider text-primary">ULTRATEARS</span>
-          <span class="text-[10px] text-base-content/60 font-mono -mt-1">NATIVE RECOMPILATION</span>
-        </div>
-        <span class="badge badge-primary badge-outline text-[11px] font-mono ml-1">v1.0.0-recomp</span>
-      </div>
-
-      <!-- Center Navigation Tabs -->
-      <div class="navbar-center">
-        <div class="tabs tabs-boxed bg-base-300 p-1" id="nav-tabs">
-          <a class="tab tab-active transition-all" data-tab="tab-launch">Dashboard</a>
-          <a class="tab transition-all" data-tab="tab-controllers">Controllers</a>
-          <a class="tab transition-all" data-tab="tab-assets">Assets</a>
-          <a class="tab transition-all" data-tab="tab-graphics">Patches & GFX</a>
-          <a class="tab transition-all" data-tab="tab-console">Console</a>
+          <span class="font-serif font-bold text-xs md:text-sm tracking-widest uppercase text-[#DCD09F]">
+            The Legend of Zelda: Tears of the Kingdom
+          </span>
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] text-[#63A7BC] font-mono tracking-wider font-semibold">ULTRATEARS • RECOMPILATION</span>
+            <span class="badge badge-outline border-[#D08D1C]/50 text-[#D08D1C] text-[10px] font-mono py-0 px-1.5 h-4">v1.0.0-recomp</span>
+          </div>
         </div>
       </div>
 
-      <!-- Right Navbar Controls -->
-      <div class="navbar-end flex items-center gap-4">
+      <!-- Center Tabs (tabs-bordered) -->
+      <div class="navbar-center hidden md:flex">
+        <div class="tabs tabs-bordered" id="nav-tabs">
+          <a class="tab tab-active transition-all tracking-wider uppercase text-xs font-serif font-semibold" data-tab="tab-launch">Dashboard</a>
+          <a class="tab transition-all tracking-wider uppercase text-xs font-serif font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-controllers">Controllers</a>
+          <a class="tab transition-all tracking-wider uppercase text-xs font-serif font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-assets">Assets</a>
+          <a class="tab transition-all tracking-wider uppercase text-xs font-serif font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-graphics">Patches & GFX</a>
+          <a class="tab transition-all tracking-wider uppercase text-xs font-serif font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-console">Console</a>
+        </div>
+      </div>
+
+      <!-- Right Controls -->
+      <div class="navbar-end flex items-center gap-3">
         <!-- Live Process Status -->
-        <div id="status-badge" class="badge badge-ghost gap-2 font-mono text-xs py-3 px-3">
+        <div id="status-badge" class="badge badge-ghost gap-2 font-mono text-xs py-2.5 px-3 border border-base-300">
           <span class="inline-block w-2 h-2 rounded-full bg-base-content/40"></span>
           <span>Engine Idle</span>
         </div>
 
-        <!-- Light / Dark Theme Swap Controller -->
-        <label class="swap swap-rotate btn btn-ghost btn-circle btn-sm">
+        <!-- Theme Toggle (Sun / Moon) -->
+        <label class="swap swap-rotate btn btn-ghost btn-circle btn-sm text-[#E8BF40]" title="Toggle Sky Island Theme">
           <input type="checkbox" id="theme-toggle" />
-          <!-- Sun Icon (visible in dark mode) -->
-          <svg class="swap-on fill-current w-5 h-5 text-secondary" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5.64,17l-.71.71a1,1,0,0,0,0,1.41,1,1,0,0,0,1.41,0l.71-.71A1,1,0,0,0,5.64,17ZM5,12a1,1,0,0,0-1-1H3a1,1,0,0,0,0,2H4A1,1,0,0,0,5,12Zm7-7a1,1,0,0,0,1-1V3a1,1,0,0,0-2,0V4A1,1,0,0,0,12,5ZM6.35,6.35A1,1,0,0,0,4.94,4.94L4.23,5.65A1,1,0,0,0,5.64,7.06ZM12,6.5A5.5,5.5,0,1,0,17.5,12,5.51,5.51,0,0,0,12,6.5Zm0,9A3.5,3.5,0,1,1,15.5,12,3.5,3.5,0,0,1,12,15.5Zm8.36-9.85-.71.71a1,1,0,0,0,1.41,1.41l.71-.71A1,1,0,0,0,20.36,5.65ZM20,11H19a1,1,0,0,0,0,2h1a1,1,0,0,0,0-2Zm-1.64,6a1,1,0,0,0-1.41,1.41l.71.71a1,1,0,0,0,1.41-1.41ZM12,19a1,1,0,0,0-1,1v1a1,1,0,0,0,2,0V20A1,1,0,0,0,12,19Z"/></svg>
-          <!-- Moon Icon (visible in light mode) -->
-          <svg class="swap-off fill-current w-5 h-5 text-primary" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21.64,13a1,1,0,0,0-1.05-.14,8.05,8.05,0,0,1-3.37.73A8.15,8.15,0,0,1,9.08,5.49a8.59,8.59,0,0,1,.25-2A1,1,0,0,0,8,2.36,10.14,10.14,0,1,0,22,14.05,1,1,0,0,0,21.64,13Zm-9.5,6.69A8.14,8.14,0,0,1,7.08,5.22v.27A10.15,10.15,0,0,0,17.22,15.63a9.79,9.79,0,0,0,2.1-.22A8.11,8.11,0,0,1,12.14,19.73Z"/></svg>
+          <!-- Sun Icon (visible when in dark mode) -->
+          <svg class="swap-on fill-current w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M5.64,17l-.71.71a1,1,0,0,0,0,1.41,1,1,0,0,0,1.41,0l.71-.71A1,1,0,0,0,5.64,17ZM5,12a1,1,0,0,0-1-1H3a1,1,0,0,0,0,2H4A1,1,0,0,0,5,12Zm7-7a1,1,0,0,0,1-1V3a1,1,0,0,0-2,0V4A1,1,0,0,0,12,5ZM6.35,6.35A1,1,0,0,0,4.94,4.94L4.23,5.65A1,1,0,0,0,5.64,7.06ZM12,6.5A5.5,5.5,0,1,0,17.5,12,5.51,5.51,0,0,0,12,6.5Zm0,9A3.5,3.5,0,1,1,15.5,12,3.5,3.5,0,0,1,12,15.5Zm8.36-9.85-.71.71a1,1,0,0,0,1.41,1.41l.71-.71A1,1,0,0,0,20.36,5.65ZM20,11H19a1,1,0,0,0,0,2h1a1,1,0,0,0,0-2Zm-1.64,6a1,1,0,0,0-1.41,1.41l.71.71a1,1,0,0,0,1.41-1.41ZM12,19a1,1,0,0,0-1,1v1a1,1,0,0,0,2,0V20A1,1,0,0,0,12,19Z"/>
+          </svg>
+          <!-- Moon Icon (visible when in light mode) -->
+          <svg class="swap-off fill-current w-5 h-5 text-[#12582C]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M21.64,13a1,1,0,0,0-1.05-.14,8.05,8.05,0,0,1-3.37.73A8.15,8.15,0,0,1,9.08,5.49a8.59,8.59,0,0,1,.25-2A1,1,0,0,0,8,2.36,10.14,10.14,0,1,0,22,14.05,1,1,0,0,0,21.64,13Zm-9.5,6.69A8.14,8.14,0,0,1,7.08,5.22v.27A10.15,10.15,0,0,0,17.22,15.63a9.79,9.79,0,0,0,2.1-.22A8.11,8.11,0,0,1,12.14,19.73Z"/>
+          </svg>
         </label>
       </div>
     </header>
 
-    <!-- Main Content Body -->
+    <!-- Main Content Area -->
     <main class="flex-1 p-6 max-w-7xl mx-auto w-full">
 
-      <!-- TAB 1: LAUNCH & OVERVIEW (DASHBOARD) -->
+      <!-- TAB 1: MAIN DECK (DASHBOARD) -->
       <section id="tab-launch" class="tab-content-panel space-y-6">
-        <!-- Stats Row -->
-        <div class="stats shadow bg-base-200 border border-base-300 w-full">
-          <div class="stat">
-            <div class="stat-figure text-primary">
-              <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
-            </div>
-            <div class="stat-title text-xs font-semibold uppercase tracking-wider">RomFS Status</div>
-            <div id="stat-romfs-status" class="stat-value text-primary text-2xl">Checking...</div>
-            <div id="stat-romfs-detail" class="stat-desc font-mono">Verifying game assets</div>
-          </div>
+        <div class="grid grid-cols-12 gap-6">
 
-          <div class="stat">
-            <div class="stat-figure text-secondary">
-              <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"/></svg>
-            </div>
-            <div class="stat-title text-xs font-semibold uppercase tracking-wider">Active Controller</div>
-            <div id="stat-active-controller" class="stat-value text-secondary text-2xl">None Detected</div>
-            <div id="stat-controller-profile" class="stat-desc font-mono">Nintendo (B/A, Y/X)</div>
-          </div>
+          <!-- Left Column (7 cols): Hero Banner Card -->
+          <div class="card bg-base-200 border border-[#DCD09F]/20 shadow-2xl overflow-hidden col-span-12 lg:col-span-7 relative p-6 zonai-watermark flex flex-col justify-between min-h-[420px]">
+            <!-- Decorative Zonai concentric circles watermark background -->
+            <div class="absolute inset-0 pointer-events-none opacity-10 bg-[radial-gradient(circle_at_30%_30%,#D08D1C_0%,transparent_60%)]"></div>
 
-          <div class="stat">
-            <div class="stat-figure text-accent">
-              <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-            </div>
-            <div class="stat-title text-xs font-semibold uppercase tracking-wider">Target Profile</div>
-            <div id="stat-target-profile" class="stat-value text-accent text-2xl">1080p Docked</div>
-            <div class="stat-desc font-mono">Mailbox V-Sync • Vulkan 1.4</div>
-          </div>
-        </div>
-
-        <!-- Hero Launch Card -->
-        <div class="card lg:card-side bg-base-200 shadow-xl border border-base-300 overflow-hidden">
-          <div class="card-body lg:w-2/3 space-y-4">
-            <div class="flex items-center gap-2">
-              <span class="badge badge-secondary badge-sm font-mono">TOTK 1.4.3</span>
-              <h2 class="card-title text-2xl font-bold tracking-tight">The Legend of Zelda: Tears of the Kingdom</h2>
-            </div>
-            <p class="text-base-content/70 text-sm">
-              Native AArch64 statically recompiled binary targeting host x86_64 CPU instructions and Vulkan 1.4 SPIR-V compute pipelines. Fully native execution with zero guest CPU emulation overhead.
-            </p>
-
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-              <div class="flex items-center justify-between bg-base-300/60 p-3 rounded-lg border border-base-300">
-                <span class="text-xs font-medium">Docked Mode</span>
-                <input type="checkbox" id="dash-docked-toggle" class="toggle toggle-primary toggle-sm" checked />
+            <div class="space-y-4 relative z-10">
+              <div class="flex items-center gap-2">
+                <span class="badge bg-[#12582C] text-[#DCD09F] border border-[#E8BF40]/40 uppercase tracking-widest text-[10px] font-mono font-semibold px-2 py-1">
+                  TOTK 1.4.3 • AARCH64 RECOMP
+                </span>
+                <span class="badge badge-outline border-[#63A7BC]/50 text-[#63A7BC] text-[10px] font-mono">
+                  Vulkan 1.4 Native
+                </span>
               </div>
-              <div class="flex items-center justify-between bg-base-300/60 p-3 rounded-lg border border-base-300">
-                <span class="text-xs font-medium">Telemetry HUD</span>
-                <input type="checkbox" id="dash-hud-toggle" class="toggle toggle-secondary toggle-sm" checked />
+
+              <div>
+                <h1 class="font-serif text-2xl lg:text-3xl font-bold tracking-wider text-[#EDE6D1] uppercase">
+                  The Legend of Zelda
+                </h1>
+                <h2 class="font-serif text-lg lg:text-xl font-semibold tracking-widest text-[#D08D1C] uppercase -mt-1">
+                  Tears of the Kingdom
+                </h2>
               </div>
-              <div class="flex items-center justify-between bg-base-300/60 p-3 rounded-lg border border-base-300">
-                <span class="text-xs font-medium">Headless (CI)</span>
-                <input type="checkbox" id="dash-headless-toggle" class="toggle toggle-accent toggle-sm" />
-              </div>
+
+              <div class="h-px w-full bg-gradient-to-r from-[#D08D1C]/60 via-[#E8BF40]/40 to-transparent"></div>
+
+              <p class="text-base-content/75 text-sm leading-relaxed max-w-xl">
+                Native AArch64 statically recompiled binary targeting host x86_64 CPU instructions and Vulkan 1.4 SPIR-V compute pipelines. Direct 39-bit memory window mapping with zero guest emulation overhead.
+              </p>
             </div>
 
-            <div class="flex items-center gap-3 pt-3">
-              <button id="btn-launch" class="btn btn-primary btn-lg flex-1 shadow-lg gap-2 text-base font-semibold">
+            <!-- Primary Launch CTA -->
+            <div class="pt-6 relative z-10">
+              <button id="btn-launch" class="btn btn-primary btn-lg w-full bg-[#D08D1C] hover:bg-[#E8BF40] text-[#111714] font-serif font-bold tracking-widest uppercase border border-[#E8BF40] shadow-[0_0_20px_rgba(208,141,28,0.25)] transition-all duration-200 hover:scale-[1.01] flex items-center justify-center gap-3">
                 <svg class="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                Launch Tears of the Kingdom
+                <span>Launch Tears of the Kingdom</span>
               </button>
-              <button id="btn-stop" class="btn btn-error btn-lg shadow-md hidden gap-2 text-base font-semibold">
+              <button id="btn-stop" class="btn btn-error btn-lg w-full font-serif font-bold tracking-widest uppercase hidden flex items-center justify-center gap-3 shadow-lg">
                 <svg class="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
-                Stop Engine
+                <span>Stop Engine Process</span>
               </button>
             </div>
           </div>
 
-          <div class="lg:w-1/3 bg-base-300/40 p-6 flex flex-col justify-between border-t lg:border-t-0 lg:border-l border-base-300">
-            <div class="space-y-3">
-              <span class="text-xs font-bold uppercase tracking-wider text-base-content/60">Active Session Quick Settings</span>
-              <div class="form-control">
-                <label class="label label-text text-xs">Render Resolution</label>
-                <select id="dash-resolution-select" class="select select-bordered select-sm w-full">
-                  <option value="720p">720p (Handheld - 1280x720)</option>
-                  <option value="1080p" selected>1080p (Native Docked - 1920x1080)</option>
-                  <option value="1440p">1440p (QHD Scale - 2560x1440)</option>
-                  <option value="4K">4K (UHD Master - 3840x2160)</option>
-                </select>
+          <!-- Right Column (5 cols): Quick Launch Configuration -->
+          <div class="card bg-base-200 border border-base-300 col-span-12 lg:col-span-5 p-6 flex flex-col justify-between shadow-xl space-y-4">
+            <div class="space-y-4">
+              <div class="flex items-center justify-between border-b border-base-300 pb-2">
+                <span class="font-serif text-sm font-bold uppercase tracking-wider text-[#DCD09F] flex items-center gap-2">
+                  <svg class="w-4 h-4 text-[#D08D1C] fill-current" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+                  Quick Configuration
+                </span>
+                <span class="text-[10px] text-base-content/50 font-mono">Profile Auto-saved</span>
               </div>
-              <div class="form-control">
-                <label class="label label-text text-xs">V-Sync Mode</label>
-                <select id="dash-vsync-select" class="select select-bordered select-sm w-full">
-                  <option value="Mailbox" selected>Mailbox (Ultra-low latency)</option>
-                  <option value="FIFO">FIFO (Standard V-Sync 60Hz)</option>
-                  <option value="Immediate">Immediate (Uncapped FPS)</option>
-                </select>
+
+              <!-- Form Controls -->
+              <div class="space-y-3">
+                <div class="form-control">
+                  <label class="label py-1 text-xs font-semibold text-base-content/70">Render Target Resolution</label>
+                  <select id="dash-resolution-select" class="select select-bordered select-sm w-full bg-base-100 font-mono text-xs focus:border-[#D08D1C]">
+                    <option value="720p">720p (Handheld / Steam Deck - 1280x720)</option>
+                    <option value="1080p" selected>1080p (Native Docked - 1920x1080)</option>
+                    <option value="1440p">1440p (QHD Display - 2560x1440)</option>
+                    <option value="4K">4K (UHD Master - 3840x2160)</option>
+                  </select>
+                </div>
+
+                <div class="form-control">
+                  <label class="label py-1 text-xs font-semibold text-base-content/70">V-Sync Presentation Cadence</label>
+                  <select id="dash-vsync-select" class="select select-bordered select-sm w-full bg-base-100 font-mono text-xs focus:border-[#D08D1C]">
+                    <option value="Mailbox" selected>Mailbox (Low-latency triple buffering)</option>
+                    <option value="FIFO">FIFO (Standard 60Hz lock)</option>
+                    <option value="Immediate">Immediate (Uncapped FPS)</option>
+                  </select>
+                </div>
+
+                <div class="pt-2 space-y-2 border-t border-base-300/80">
+                  <div class="flex items-center justify-between py-1">
+                    <span class="text-xs font-medium text-base-content/80">Docked Mode (High Power)</span>
+                    <input type="checkbox" id="dash-docked-toggle" class="toggle toggle-primary toggle-sm" checked />
+                  </div>
+
+                  <div class="flex items-center justify-between py-1">
+                    <span class="text-xs font-medium text-base-content/80">On-Screen Telemetry HUD</span>
+                    <input type="checkbox" id="dash-hud-toggle" class="toggle toggle-primary toggle-sm" checked />
+                  </div>
+
+                  <div class="flex items-center justify-between py-1">
+                    <span class="text-xs font-medium text-base-content/80">Headless Execution (CI/Tests)</span>
+                    <input type="checkbox" id="dash-headless-toggle" class="toggle toggle-primary toggle-sm" />
+                  </div>
+                </div>
               </div>
             </div>
-            <div class="mt-4 pt-4 border-t border-base-300/60 flex items-center justify-between text-xs text-base-content/60 font-mono">
-              <span>Host OS: Linux</span>
-              <span id="quick-pid-label">PID: --</span>
+
+            <div class="pt-3 border-t border-base-300 text-[11px] text-base-content/50 font-mono flex justify-between items-center">
+              <span>Host: x86_64 Linux</span>
+              <span class="text-[#63A7BC]">RADV / Vulkan 1.4</span>
             </div>
           </div>
+
         </div>
       </section>
 
       <!-- TAB 2: CONTROLLER TUNING & RUMBLE STUDIO -->
       <section id="tab-controllers" class="tab-content-panel space-y-6 hidden">
-        <!-- Device Selector Card -->
-        <div class="card bg-base-200 border border-base-300 shadow-md p-6">
+        <!-- Top Bar: Device Selector -->
+        <div class="card bg-base-200 border border-base-300 shadow-md p-5">
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div class="flex-1 space-y-1">
-              <label class="text-xs font-bold uppercase tracking-wider text-base-content/60">Selected Gamepad Device</label>
-              <div class="flex gap-2">
-                <select id="ctrl-device-select" class="select select-bordered w-full font-mono text-sm">
+              <label class="text-xs font-serif font-bold uppercase tracking-wider text-[#DCD09F]">Connected Gamepad Device</label>
+              <div class="join w-full">
+                <select id="ctrl-device-select" class="select select-bordered join-item w-full font-mono text-xs bg-base-100">
                   <option value="">Scanning for connected gamepads...</option>
                 </select>
-                <button id="btn-refresh-controllers" class="btn btn-outline btn-primary gap-1">
+                <button id="btn-refresh-controllers" class="btn btn-secondary join-item font-serif text-xs uppercase tracking-wider gap-1.5">
                   <svg class="w-4 h-4 fill-none stroke-current" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                   Scan
                 </button>
               </div>
             </div>
+
             <div class="w-full md:w-64 space-y-1">
-              <label class="text-xs font-bold uppercase tracking-wider text-base-content/60">Button Layout Preset</label>
-              <select id="ctrl-profile-select" class="select select-bordered w-full text-sm">
+              <label class="text-xs font-serif font-bold uppercase tracking-wider text-[#DCD09F]">Button Layout Preset</label>
+              <select id="ctrl-profile-select" class="select select-bordered w-full font-mono text-xs bg-base-100">
                 <option value="Nintendo (B/A, Y/X)" selected>Nintendo (B/A, Y/X)</option>
                 <option value="Xbox / PC Standard">Xbox / PC Standard (A/B, X/Y Swap)</option>
               </select>
@@ -183,202 +207,206 @@
           </div>
         </div>
 
+        <!-- 2-Column Calibration Deck -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <!-- Analog Stick Calibration & Live Preview -->
-          <div class="card bg-base-200 border border-base-300 shadow-md p-6 space-y-6">
-            <div class="flex items-center justify-between">
-              <h3 class="font-bold text-lg text-primary flex items-center gap-2">
-                <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>
-                Analog Stick Deadzones & Calibration
+
+          <!-- Left Stick Visualizer & Scope -->
+          <div class="card bg-base-200 border border-base-300 shadow-md p-5 space-y-5">
+            <div class="flex items-center justify-between border-b border-base-300 pb-2">
+              <h3 class="font-serif font-bold text-sm tracking-wider uppercase text-[#DCD09F] flex items-center gap-2">
+                <svg class="w-4 h-4 text-[#63A7BC] fill-current" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>
+                Purah Pad Aiming & Deadzone Scope
               </h3>
-              <span class="badge badge-xs badge-primary animate-pulse">Live Polling</span>
+              <span class="badge badge-xs badge-accent font-mono animate-pulse">40ms Poll</span>
             </div>
 
-            <!-- Two Circular Canvases -->
+            <!-- Dual Scope Canvases -->
             <div class="grid grid-cols-2 gap-4">
+              <!-- Left Stick -->
               <div class="text-center space-y-2">
-                <span class="text-xs font-semibold text-base-content/70">Left Stick (LS)</span>
-                <div class="relative w-36 h-36 mx-auto bg-base-300 rounded-full border border-primary/40 shadow-inner flex items-center justify-center">
+                <span class="text-xs font-mono text-base-content/80 font-semibold">Left Stick (LS / Move)</span>
+                <div class="purah-scope-grid relative w-36 h-36 mx-auto bg-base-100 rounded-full border border-[#63A7BC]/40 shadow-inner flex items-center justify-center overflow-hidden">
                   <!-- Visual Deadzone Circle -->
-                  <div id="stick-l-deadzone-visual" class="absolute rounded-full border border-secondary/40 bg-secondary/10" style="width: 20%; height: 20%;"></div>
+                  <div id="stick-l-deadzone-visual" class="absolute rounded-full border border-[#D08D1C]/60 bg-[#D08D1C]/15" style="width: 20%; height: 20%;"></div>
+                  <!-- Center crosshair lines -->
+                  <div class="absolute w-full h-[1px] bg-[#63A7BC]/20"></div>
+                  <div class="absolute h-full w-[1px] bg-[#63A7BC]/20"></div>
                   <!-- Stick Position Dot -->
-                  <div id="stick-l-dot" class="absolute w-4 h-4 rounded-full bg-primary shadow-lg border border-white" style="transform: translate(0px, 0px);"></div>
+                  <div id="stick-l-dot" class="absolute w-3.5 h-3.5 rounded-full bg-[#63A7BC] shadow-[0_0_8px_#63A7BC] border border-white" style="transform: translate(0px, 0px);"></div>
                 </div>
-                <div id="stick-l-coords" class="font-mono text-[11px] text-base-content/60">X: 0.00 | Y: 0.00</div>
+                <div id="stick-l-coords" class="font-mono text-[10px] text-[#63A7BC]">X: 0.00 | Y: 0.00</div>
               </div>
 
+              <!-- Right Stick -->
               <div class="text-center space-y-2">
-                <span class="text-xs font-semibold text-base-content/70">Right Stick (RS / Camera)</span>
-                <div class="relative w-36 h-36 mx-auto bg-base-300 rounded-full border border-primary/40 shadow-inner flex items-center justify-center">
+                <span class="text-xs font-mono text-base-content/80 font-semibold">Right Stick (RS / Camera)</span>
+                <div class="purah-scope-grid relative w-36 h-36 mx-auto bg-base-100 rounded-full border border-[#63A7BC]/40 shadow-inner flex items-center justify-center overflow-hidden">
                   <!-- Visual Deadzone Circle -->
-                  <div id="stick-r-deadzone-visual" class="absolute rounded-full border border-secondary/40 bg-secondary/10" style="width: 20%; height: 20%;"></div>
+                  <div id="stick-r-deadzone-visual" class="absolute rounded-full border border-[#D08D1C]/60 bg-[#D08D1C]/15" style="width: 20%; height: 20%;"></div>
+                  <!-- Center crosshair lines -->
+                  <div class="absolute w-full h-[1px] bg-[#63A7BC]/20"></div>
+                  <div class="absolute h-full w-[1px] bg-[#63A7BC]/20"></div>
                   <!-- Stick Position Dot -->
-                  <div id="stick-r-dot" class="absolute w-4 h-4 rounded-full bg-accent shadow-lg border border-white" style="transform: translate(0px, 0px);"></div>
+                  <div id="stick-r-dot" class="absolute w-3.5 h-3.5 rounded-full bg-[#E8BF40] shadow-[0_0_8px_#E8BF40] border border-white" style="transform: translate(0px, 0px);"></div>
                 </div>
-                <div id="stick-r-coords" class="font-mono text-[11px] text-base-content/60">X: 0.00 | Y: 0.00</div>
+                <div id="stick-r-coords" class="font-mono text-[10px] text-[#E8BF40]">X: 0.00 | Y: 0.00</div>
               </div>
             </div>
 
-            <!-- Sliders for deadzones -->
-            <div class="space-y-4">
+            <!-- Deadzone Sliders -->
+            <div class="space-y-3 pt-2">
               <div class="space-y-1">
                 <div class="flex justify-between text-xs">
-                  <span>Left Stick Inner Deadzone</span>
-                  <span id="label-deadzone-l" class="font-mono text-primary">10%</span>
+                  <span class="text-base-content/75 font-medium">Left Stick Inner Deadzone</span>
+                  <span id="label-deadzone-l" class="font-mono text-[#D08D1C]">10%</span>
                 </div>
-                <input type="range" id="slider-deadzone-l" min="0" max="40" value="10" class="range range-primary range-sm" />
+                <input type="range" id="slider-deadzone-l" min="0" max="40" value="10" class="range range-primary range-xs" />
               </div>
 
               <div class="space-y-1">
                 <div class="flex justify-between text-xs">
-                  <span>Right Stick Inner Deadzone</span>
-                  <span id="label-deadzone-r" class="font-mono text-accent">10%</span>
+                  <span class="text-base-content/75 font-medium">Right Stick Inner Deadzone</span>
+                  <span id="label-deadzone-r" class="font-mono text-[#D08D1C]">10%</span>
                 </div>
-                <input type="range" id="slider-deadzone-r" min="0" max="40" value="10" class="range range-accent range-sm" />
+                <input type="range" id="slider-deadzone-r" min="0" max="40" value="10" class="range range-primary range-xs" />
               </div>
 
               <div class="space-y-1">
                 <div class="flex justify-between text-xs">
-                  <span>Trigger Actuation Threshold (ZL / ZR)</span>
-                  <span id="label-trigger-thresh" class="font-mono text-secondary">5%</span>
+                  <span class="text-base-content/75 font-medium">Trigger Actuation Threshold (ZL / ZR)</span>
+                  <span id="label-trigger-thresh" class="font-mono text-[#63A7BC]">5%</span>
                 </div>
-                <input type="range" id="slider-trigger-thresh" min="1" max="50" value="5" class="range range-secondary range-xs" />
+                <input type="range" id="slider-trigger-thresh" min="1" max="50" value="5" class="range range-accent range-xs" />
               </div>
             </div>
           </div>
 
-          <!-- Rumble & Haptics Studio -->
+          <!-- Right Column: Rumble & Motion Haptics -->
           <div class="space-y-6">
-            <div class="card bg-base-200 border border-base-300 shadow-md p-6 space-y-4">
-              <h3 class="font-bold text-lg text-secondary flex items-center gap-2">
-                <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
-                Rumble & Force Feedback (Haptics)
+            <!-- Rumble Card -->
+            <div class="card bg-base-200 border border-base-300 shadow-md p-5 space-y-4">
+              <h3 class="font-serif font-bold text-sm tracking-wider uppercase text-[#DCD09F] flex items-center gap-2 border-b border-base-300 pb-2">
+                <svg class="w-4 h-4 text-[#D08D1C] fill-current" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
+                Haptic Feedback & Rumble Studio
               </h3>
 
-              <div class="flex items-center justify-between p-3 bg-base-300/60 rounded-lg border border-base-300">
+              <div class="flex items-center justify-between p-3 bg-base-100 rounded-sm border border-base-300">
                 <div>
-                  <div class="text-sm font-semibold">Master Vibration</div>
-                  <div class="text-xs text-base-content/60">Enable hardware motor force feedback</div>
+                  <div class="text-xs font-semibold text-base-content">Master Vibration Force</div>
+                  <div class="text-[10px] text-base-content/60">Hardware dual-eccentric mass motor support</div>
                 </div>
-                <input type="checkbox" id="ctrl-rumble-toggle" class="toggle toggle-primary" checked />
+                <input type="checkbox" id="ctrl-rumble-toggle" class="toggle toggle-primary toggle-sm" checked />
               </div>
 
-              <div class="space-y-1 pt-2">
+              <div class="space-y-1 pt-1">
                 <div class="flex justify-between text-xs">
-                  <span>Vibration Intensity</span>
-                  <span id="label-rumble-intensity" class="font-mono text-secondary">100%</span>
+                  <span class="text-base-content/75 font-medium">Vibration Gain</span>
+                  <span id="label-rumble-intensity" class="font-mono text-[#E8BF40]">100%</span>
                 </div>
-                <input type="range" id="slider-rumble-intensity" min="0" max="150" value="100" class="range range-secondary" />
-                <div class="w-full flex justify-between text-[10px] px-2 text-base-content/40">
-                  <span>0%</span>
-                  <span>50%</span>
-                  <span>100% (Default)</span>
-                  <span>150% (Max)</span>
-                </div>
+                <input type="range" id="slider-rumble-intensity" min="0" max="150" value="100" class="range range-secondary range-xs" />
               </div>
 
-              <div class="flex items-center justify-between p-3 bg-base-300/60 rounded-lg border border-base-300">
+              <div class="flex items-center justify-between p-3 bg-base-100 rounded-sm border border-base-300">
                 <div>
-                  <div class="text-sm font-semibold">HD Rumble / LRA Harmonic Simulation</div>
-                  <div class="text-xs text-base-content/60">Emulate Linear Resonant Actuator pulses on DualSense & Pro Pad</div>
+                  <div class="text-xs font-semibold text-base-content">HD Rumble LRA Simulation</div>
+                  <div class="text-[10px] text-base-content/60">Emulate Linear Resonant Actuator pulses</div>
                 </div>
-                <input type="checkbox" id="ctrl-hd-rumble-toggle" class="checkbox checkbox-accent" checked />
+                <input type="checkbox" id="ctrl-hd-rumble-toggle" class="checkbox checkbox-accent checkbox-sm" checked />
               </div>
 
-              <div class="pt-2">
-                <button id="btn-test-rumble" class="btn btn-secondary btn-outline btn-block gap-2">
-                  <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M13 3h-2v10h2V3zm4.83 2.17l-1.42 1.42C17.99 7.86 19 9.81 19 12c0 3.87-3.13 7-7 7s-7-3.13-7-7c0-2.19 1.01-4.14 2.58-5.42L6.17 5.17C4.23 6.82 3 9.26 3 12c0 4.97 4.03 9 9 9s9-4.03 9-9c0-2.74-1.23-5.18-3.17-6.83z"/></svg>
-                  Test Rumble Pulse (200ms)
-                </button>
-              </div>
+              <button id="btn-test-rumble" class="btn btn-outline border-[#D08D1C] text-[#E8BF40] hover:bg-[#D08D1C] hover:text-[#111714] btn-sm w-full font-serif tracking-wider uppercase gap-2 transition-all">
+                <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M13 3h-2v10h2V3zm4.83 2.17l-1.42 1.42C17.99 7.86 19 9.81 19 12c0 3.87-3.13 7-7 7s-7-3.13-7-7c0-2.19 1.01-4.14 2.58-5.42L6.17 5.17C4.23 6.82 3 9.26 3 12c0 4.97 4.03 9 9 9s9-4.03 9-9c0-2.74-1.23-5.18-3.17-6.83z"/></svg>
+                Test Haptic Pulse (250ms)
+              </button>
             </div>
 
-            <!-- Motion & Gyro Aiming -->
-            <div class="card bg-base-200 border border-base-300 shadow-md p-6 space-y-4">
-              <h3 class="font-bold text-lg text-accent flex items-center gap-2">
-                <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0013 3.06V1h-2v2.06A8.994 8.994 0 003.06 11H1v2h2.06A8.994 8.994 0 0011 20.94V23h2v-2.06A8.994 8.994 0 0020.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
+            <!-- Motion & Gyro -->
+            <div class="card bg-base-200 border border-base-300 shadow-md p-5 space-y-3">
+              <h3 class="font-serif font-bold text-sm tracking-wider uppercase text-[#DCD09F] flex items-center gap-2 border-b border-base-300 pb-2">
+                <svg class="w-4 h-4 text-[#63A7BC] fill-current" viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0013 3.06V1h-2v2.06A8.994 8.994 0 003.06 11H1v2h2.06A8.994 8.994 0 0011 20.94V23h2v-2.06A8.994 8.994 0 0020.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
                 Motion & Gyroscope Aiming
               </h3>
 
-              <div class="flex items-center justify-between p-3 bg-base-300/60 rounded-lg border border-base-300">
+              <div class="flex items-center justify-between p-3 bg-base-100 rounded-sm border border-base-300">
                 <div>
-                  <div class="text-sm font-semibold">Enable Gyro Aiming (Bow & Scope)</div>
-                  <div class="text-xs text-base-content/60">Feed IMU motion vectors into guest camera</div>
+                  <div class="text-xs font-semibold text-base-content">Enable Gyro Aiming</div>
+                  <div class="text-[10px] text-base-content/60">Feed IMU motion vectors into guest camera</div>
                 </div>
-                <input type="checkbox" id="ctrl-gyro-toggle" class="toggle toggle-accent" checked />
+                <input type="checkbox" id="ctrl-gyro-toggle" class="toggle toggle-accent toggle-sm" checked />
               </div>
 
               <div class="space-y-1">
                 <div class="flex justify-between text-xs">
-                  <span>Gyroscope Sensitivity</span>
-                  <span id="label-gyro-sens" class="font-mono text-accent">1.0x</span>
+                  <span class="text-base-content/75 font-medium">Gyroscope Sensitivity</span>
+                  <span id="label-gyro-sens" class="font-mono text-[#63A7BC]">1.0x</span>
                 </div>
-                <input type="range" id="slider-gyro-sens" min="2" max="30" value="10" class="range range-accent range-sm" />
+                <input type="range" id="slider-gyro-sens" min="2" max="30" value="10" class="range range-accent range-xs" />
               </div>
             </div>
           </div>
+
         </div>
       </section>
 
-      <!-- TAB 3: ROMFS & ASSET MANAGER -->
+      <!-- TAB 3: ROMFS & ASSET VAULT -->
       <section id="tab-assets" class="tab-content-panel space-y-6 hidden">
         <div class="card bg-base-200 border border-base-300 shadow-md p-6 space-y-6">
-          <div>
-            <h3 class="font-bold text-xl text-primary">RomFS Directory & Packed Archive Setup</h3>
-            <p class="text-sm text-base-content/70">
-              Select your legally dumped Tears of the Kingdom 1.4.3 RomFS directory or pre-indexed <code class="text-xs bg-base-300 px-1 py-0.5 rounded font-mono">romfs.bin</code> file.
+          <div class="border-b border-base-300 pb-3">
+            <h3 class="font-serif font-bold text-lg text-[#DCD09F] uppercase tracking-wider">RomFS Asset Vault & Integrity</h3>
+            <p class="text-xs text-base-content/70">
+              Select your legally dumped Tears of the Kingdom 1.4.3 RomFS directory or pre-indexed <code class="text-xs bg-base-100 px-1 py-0.5 rounded font-mono text-[#E8BF40]">romfs.bin</code> file.
             </p>
           </div>
 
           <!-- Path Input & Picker -->
           <div class="form-control space-y-2">
-            <label class="label text-xs font-bold uppercase tracking-wider text-base-content/60">RomFS File or Directory Path</label>
+            <label class="label py-0 text-xs font-serif font-bold uppercase tracking-wider text-[#DCD09F]">RomFS Location</label>
             <div class="join w-full">
-              <input type="text" id="assets-romfs-input" placeholder="/path/to/extracted/romfs or /path/to/romfs.bin" class="input input-bordered join-item w-full font-mono text-sm" />
-              <button id="btn-browse-romfs" class="btn btn-primary join-item gap-2">
+              <input type="text" id="assets-romfs-input" placeholder="/path/to/extracted/romfs or /path/to/romfs.bin" class="input input-bordered join-item w-full font-mono text-xs bg-base-100 focus:border-[#D08D1C]" />
+              <button id="btn-browse-romfs" class="btn btn-secondary join-item font-serif text-xs uppercase tracking-wider gap-2">
                 <svg class="w-4 h-4 fill-none stroke-current" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z"/></svg>
                 Browse Path
               </button>
             </div>
           </div>
 
-          <!-- Validation Checklist Alerts -->
+          <!-- Integrity Checklist -->
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div id="check-version" class="alert alert-warning text-xs flex items-center justify-between p-3">
+            <div id="check-version" class="alert bg-base-100 border border-base-300 text-xs flex items-center justify-between p-3 rounded-sm">
               <div class="flex items-center gap-2">
                 <span class="indicator-icon">⚠️</span>
-                <span>System/Version/ett.byml</span>
+                <span class="font-mono text-xs">System/Version/ett.byml</span>
               </div>
-              <span class="badge badge-sm badge-ghost status-text">Missing</span>
+              <span class="badge badge-sm badge-ghost status-text font-mono">Missing</span>
             </div>
 
-            <div id="check-pack" class="alert alert-warning text-xs flex items-center justify-between p-3">
+            <div id="check-pack" class="alert bg-base-100 border border-base-300 text-xs flex items-center justify-between p-3 rounded-sm">
               <div class="flex items-center gap-2">
                 <span class="indicator-icon">⚠️</span>
-                <span>Pack/ (SZS Game Archives)</span>
+                <span class="font-mono text-xs">Pack/ (SZS Game Archives)</span>
               </div>
-              <span class="badge badge-sm badge-ghost status-text">Missing</span>
+              <span class="badge badge-sm badge-ghost status-text font-mono">Missing</span>
             </div>
 
-            <div id="check-shader" class="alert alert-warning text-xs flex items-center justify-between p-3">
+            <div id="check-shader" class="alert bg-base-100 border border-base-300 text-xs flex items-center justify-between p-3 rounded-sm">
               <div class="flex items-center gap-2">
                 <span class="indicator-icon">⚠️</span>
-                <span>Shader/ (BNSH Archives)</span>
+                <span class="font-mono text-xs">Shader/ (BNSH Archives)</span>
               </div>
-              <span class="badge badge-sm badge-ghost status-text">Missing</span>
+              <span class="badge badge-sm badge-ghost status-text font-mono">Missing</span>
             </div>
           </div>
 
-          <!-- RomFS Bin Packer Card -->
-          <div class="card bg-base-300/50 border border-base-300 p-6 space-y-4">
+          <!-- Archive Packer Card -->
+          <div class="card bg-base-100 border border-base-300 p-5 space-y-4 rounded-sm">
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <h4 class="font-bold text-base text-secondary">Compress & Index into romfs.bin</h4>
+                <h4 class="font-serif font-bold text-sm text-[#D08D1C] uppercase tracking-wider">Build Indexed romfs.bin</h4>
                 <p class="text-xs text-base-content/70">
-                  Packs loose RomFS files into an indexed binary for 5x faster engine boot and instantaneous asset seek.
+                  Compresses and indexes loose assets into a single linear binary for faster initial seek and zero runtime file descriptor exhaustion.
                 </p>
               </div>
-              <button id="btn-pack-romfs" class="btn btn-secondary btn-sm gap-2">
+              <button id="btn-pack-romfs" class="btn btn-primary btn-sm font-serif uppercase tracking-wider gap-2">
                 <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
                 Pack romfs.bin Now
               </button>
@@ -386,132 +414,167 @@
 
             <div id="pack-progress-container" class="space-y-2 hidden">
               <div class="flex justify-between text-xs font-mono">
-                <span id="pack-progress-status">Packing RomFS...</span>
-                <span id="pack-progress-pct">0%</span>
+                <span id="pack-progress-status" class="text-[#63A7BC]">Packing RomFS...</span>
+                <span id="pack-progress-pct" class="text-[#E8BF40]">0%</span>
               </div>
-              <progress id="pack-progress-bar" class="progress progress-primary w-full" value="0" max="100"></progress>
+              <progress id="pack-progress-bar" class="progress progress-primary w-full bg-base-200" value="0" max="100"></progress>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- TAB 4: GRAPHICS & PATCH HUB -->
+      <!-- TAB 4: GRAPHICS & RUNTIME PATCHES -->
       <section id="tab-graphics" class="tab-content-panel space-y-6 hidden">
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <!-- Display & Vulkan Settings -->
-          <div class="card bg-base-200 border border-base-300 shadow-md p-6 space-y-4 lg:col-span-1">
-            <h3 class="font-bold text-lg text-primary flex items-center gap-2">
-              <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>
+
+          <!-- Left Column: Display & Vulkan GFX -->
+          <div class="card bg-base-200 border border-base-300 shadow-md p-5 space-y-4 lg:col-span-1">
+            <h3 class="font-serif font-bold text-sm text-[#DCD09F] uppercase tracking-wider flex items-center gap-2 border-b border-base-300 pb-2">
+              <svg class="w-4 h-4 text-[#D08D1C] fill-current" viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>
               Display & Vulkan GFX
             </h3>
 
             <div class="form-control space-y-1">
-              <label class="label text-xs font-bold uppercase tracking-wider text-base-content/60">Aspect Ratio</label>
-              <select id="gfx-aspect-select" class="select select-bordered select-sm w-full">
-                <option value="16:9" selected>16:9 (Standard 1080p / 4K TV)</option>
+              <label class="label py-0 text-xs font-semibold text-base-content/75">Target Aspect Ratio</label>
+              <select id="gfx-aspect-select" class="select select-bordered select-sm w-full bg-base-100 font-mono text-xs">
+                <option value="16:9" selected>16:9 (Standard 1080p / 4K)</option>
                 <option value="16:10">16:10 (Steam Deck Native - 1280x800)</option>
                 <option value="21:9">21:9 (Ultrawide Monitor)</option>
               </select>
             </div>
 
             <div class="form-control space-y-1">
-              <label class="label text-xs font-bold uppercase tracking-wider text-base-content/60">Vulkan Device Index</label>
-              <input type="number" id="gfx-device-idx" class="input input-bordered input-sm font-mono" value="0" min="0" max="8" />
+              <label class="label py-0 text-xs font-semibold text-base-content/75">Vulkan Device Index</label>
+              <input type="number" id="gfx-device-idx" class="input input-bordered input-sm font-mono bg-base-100" value="0" min="0" max="8" />
             </div>
 
-            <div class="flex items-center justify-between p-3 bg-base-300/60 rounded-lg border border-base-300">
+            <div class="flex items-center justify-between p-3 bg-base-100 rounded-sm border border-base-300">
               <div>
-                <div class="text-sm font-semibold">Async Replay (VK)</div>
-                <div class="text-xs text-base-content/60">Asynchronous command buffer record</div>
+                <div class="text-xs font-semibold text-base-content">Vulkan Async Replay</div>
+                <div class="text-[10px] text-base-content/60">Asynchronous command buffer replay</div>
               </div>
               <input type="checkbox" id="gfx-async-replay-toggle" class="toggle toggle-primary toggle-sm" />
             </div>
 
-            <div class="flex items-center justify-between p-3 bg-base-300/60 rounded-lg border border-base-300">
+            <div class="flex items-center justify-between p-3 bg-base-100 rounded-sm border border-base-300">
               <div>
-                <div class="text-sm font-semibold">Fullscreen Mode</div>
-                <div class="text-xs text-base-content/60">Exclusive borderless window</div>
+                <div class="text-xs font-semibold text-base-content">Exclusive Fullscreen</div>
+                <div class="text-[10px] text-base-content/60">Borderless display grab</div>
               </div>
               <input type="checkbox" id="gfx-fullscreen-toggle" class="toggle toggle-accent toggle-sm" />
             </div>
           </div>
 
-          <!-- Patches & Runtime Shims Table -->
-          <div class="card bg-base-200 border border-base-300 shadow-md p-6 space-y-4 lg:col-span-2">
-            <div class="flex items-center justify-between">
+          <!-- Right Column: Patches & Runtime Engine Shims Table -->
+          <div class="card bg-base-200 border border-base-300 shadow-md p-5 space-y-4 lg:col-span-2">
+            <div class="flex items-center justify-between border-b border-base-300 pb-2">
               <div>
-                <h3 class="font-bold text-lg text-secondary">Patches & Runtime Engine Shims</h3>
-                <p class="text-xs text-base-content/60">Toggle low-level allocator shims and performance hacks applied at boot</p>
+                <h3 class="font-serif font-bold text-sm text-[#DCD09F] uppercase tracking-wider">Engine Shims & Runtime Patches</h3>
+                <p class="text-[11px] text-base-content/60">Toggle low-level allocator shims and performance hooks injected into guest routines</p>
               </div>
-              <button id="btn-save-patches" class="btn btn-sm btn-outline btn-secondary">Save Configuration</button>
+              <button id="btn-save-patches" class="btn btn-xs btn-outline border-[#D08D1C] text-[#E8BF40] hover:bg-[#D08D1C] hover:text-[#111714] font-serif uppercase tracking-wider">Save Config</button>
             </div>
 
-            <div class="overflow-x-auto rounded-lg border border-base-300">
-              <table class="table table-zebra bg-base-200 w-full text-sm">
+            <div class="overflow-x-auto rounded-sm border border-base-300">
+              <table class="table table-sm bg-base-100 w-full text-xs">
                 <thead>
-                  <tr class="bg-base-300 text-xs">
-                    <th class="w-12 text-center">Enable</th>
-                    <th>Patch Subsystem</th>
-                    <th>Description</th>
+                  <tr class="bg-base-200 text-[#DCD09F] font-serif border-b border-base-300">
+                    <th class="w-12 text-center">Hook</th>
+                    <th>Subsystem / Target Symbol</th>
+                    <th>Technical Description</th>
                   </tr>
                 </thead>
                 <tbody id="patches-table-body">
-                  <!-- Generated dynamically from config.patches -->
+                  <!-- Dynamically populated from config.patches -->
                 </tbody>
               </table>
             </div>
           </div>
+
         </div>
       </section>
 
-      <!-- TAB 5: LIVE ENGINE TELEMETRY & LOGS (CONSOLE) -->
+      <!-- TAB 5: ENGINE TELEMETRY CONSOLE -->
       <section id="tab-console" class="tab-content-panel space-y-4 hidden">
         <!-- Toolbar -->
-        <div class="flex flex-wrap items-center justify-between gap-3 p-3 bg-base-200 rounded-lg border border-base-300">
+        <div class="flex flex-wrap items-center justify-between gap-3 p-3 bg-base-200 rounded-sm border border-base-300">
           <div class="flex items-center gap-3">
-            <div class="flex items-center gap-1">
-              <span class="text-xs font-semibold text-base-content/70">Level:</span>
-              <select id="log-filter-channel" class="select select-bordered select-xs font-mono">
-                <option value="all" selected>All Channels</option>
+            <div class="flex items-center gap-1.5">
+              <span class="text-xs font-serif font-semibold text-[#DCD09F]">Channel:</span>
+              <select id="log-filter-channel" class="select select-bordered select-xs font-mono bg-base-100 text-xs">
+                <option value="all" selected>All Subsystems</option>
                 <option value="gfx">[totk-gfx]</option>
                 <option value="thread">[totk-thread]</option>
                 <option value="error">Errors & Signals</option>
-                <option value="info">Info</option>
+                <option value="info">Runtime Info</option>
               </select>
             </div>
 
-            <div class="flex items-center gap-1">
-              <span class="text-xs font-semibold text-base-content/70">Search:</span>
-              <input type="text" id="log-search-input" placeholder="Filter pattern..." class="input input-bordered input-xs font-mono w-44" />
+            <div class="flex items-center gap-1.5">
+              <span class="text-xs font-serif font-semibold text-[#DCD09F]">Search:</span>
+              <input type="text" id="log-search-input" placeholder="Filter pattern..." class="input input-bordered input-xs font-mono w-48 bg-base-100 text-xs" />
             </div>
           </div>
 
           <div class="flex items-center gap-3">
             <label class="flex items-center gap-2 cursor-pointer text-xs">
-              <span>Auto-scroll</span>
+              <span class="text-base-content/80 font-medium">Auto-scroll</span>
               <input type="checkbox" id="log-autoscroll-toggle" class="toggle toggle-primary toggle-xs" checked />
             </label>
-            <button id="btn-clear-logs" class="btn btn-ghost btn-xs">Clear</button>
-            <button id="btn-export-logs" class="btn btn-outline btn-xs gap-1 font-mono">
+            <button id="btn-clear-logs" class="btn btn-ghost btn-xs text-xs font-mono">Clear</button>
+            <button id="btn-export-logs" class="btn btn-outline border-base-300 btn-xs gap-1 font-mono text-xs">
               <svg class="w-3 h-3 fill-none stroke-current" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               Export Log
             </button>
           </div>
         </div>
 
-        <!-- Terminal Output -->
-        <div class="mockup-code bg-neutral text-neutral-content h-[460px] overflow-y-auto font-mono text-xs shadow-xl border border-base-300" id="console-terminal">
-          <div class="px-5 py-2 text-primary font-bold border-b border-neutral-content/10 flex justify-between">
-            <span>[UltraTears System Telemetry Console]</span>
-            <span id="log-line-counter" class="text-neutral-content/40">0 lines</span>
+        <!-- Terminal Window (Mockup Code) -->
+        <div class="mockup-code bg-[#0D1210] border border-[#222F29] text-xs font-mono h-[440px] overflow-y-auto shadow-2xl rounded-sm" id="console-terminal">
+          <div class="px-5 py-2 text-[#DCD09F] font-bold border-b border-[#222F29] flex justify-between items-center bg-[#111714]">
+            <span class="font-serif tracking-wider text-xs uppercase flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-[#D08D1C]"></span>
+              UltraTears System Telemetry Console
+            </span>
+            <span id="log-line-counter" class="text-[#E8BF40] font-mono text-[11px]">0 lines</span>
           </div>
-          <div id="log-output-container" class="p-3 space-y-1">
-            <pre class="text-neutral-content/50"><code>UltraTears launcher initialized. Waiting for engine start...</code></pre>
+          <div id="log-output-container" class="p-4 space-y-1">
+            <pre class="text-[#DCD09F]/50"><code>UltraTears launcher initialized. Waiting for engine start...</code></pre>
           </div>
         </div>
       </section>
 
     </main>
+
+    <!-- Sleek Status Bar Footer -->
+    <footer class="footer bg-base-200 border-t border-[#DCD09F]/15 px-6 py-2.5 text-xs flex flex-wrap items-center justify-between mt-auto">
+      <div class="flex items-center gap-6">
+        <!-- RomFS Indicator -->
+        <div class="flex items-center gap-2">
+          <span class="text-base-content/60 uppercase tracking-wider text-[10px] font-semibold">RomFS:</span>
+          <span id="stat-romfs-status" class="badge badge-sm badge-outline text-[11px] font-mono">Checking...</span>
+          <span id="stat-romfs-detail" class="text-[11px] text-base-content/60 font-mono hidden md:inline">Verifying assets</span>
+        </div>
+
+        <!-- Controller Indicator -->
+        <div class="flex items-center gap-2">
+          <span class="text-base-content/60 uppercase tracking-wider text-[10px] font-semibold">Gamepad:</span>
+          <span id="stat-active-controller" class="badge badge-sm badge-secondary text-[11px] font-mono">None Detected</span>
+          <span id="stat-controller-profile" class="text-[11px] text-base-content/60 font-mono hidden md:inline">Nintendo Layout</span>
+        </div>
+
+        <!-- Profile Indicator -->
+        <div class="flex items-center gap-2">
+          <span class="text-base-content/60 uppercase tracking-wider text-[10px] font-semibold">Profile:</span>
+          <span id="stat-target-profile" class="badge badge-sm badge-accent text-[11px] font-mono">1080p Docked</span>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-4 text-base-content/60 font-mono text-[11px]">
+        <span>Host: x86_64 POSIX</span>
+        <span id="quick-pid-label">PID: --</span>
+      </div>
+    </footer>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

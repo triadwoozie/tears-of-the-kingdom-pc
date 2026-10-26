@@ -203,16 +203,17 @@ function initTabs() {
 
 // 2. Theme Switching
 function applyTheme(themeName: string) {
-  docRoot.setAttribute("data-theme", themeName);
-  themeToggle.checked = themeName === "zonai-dark";
+  const finalTheme = themeName === "sky-island-light" ? "sky-island-light" : "sky-island-dark";
+  docRoot.setAttribute("data-theme", finalTheme);
+  themeToggle.checked = finalTheme === "sky-island-dark";
   if (currentConfig) {
-    currentConfig.theme = themeName;
+    currentConfig.theme = finalTheme;
     invoke("save_config", { config: currentConfig }).catch(console.error);
   }
 }
 
 themeToggle.addEventListener("change", () => {
-  const nextTheme = themeToggle.checked ? "zonai-dark" : "sky-island-light";
+  const nextTheme = themeToggle.checked ? "sky-island-dark" : "sky-island-light";
   applyTheme(nextTheme);
 });
 
@@ -220,7 +221,7 @@ themeToggle.addEventListener("change", () => {
 async function loadConfig() {
   try {
     currentConfig = await invoke<LauncherConfig>("get_config");
-    applyTheme(currentConfig.theme || "zonai-dark");
+    applyTheme(currentConfig.theme === "sky-island-light" ? "sky-island-light" : "sky-island-dark");
 
     // Hydrate Dashboard & Quick settings
     dashDockedToggle.checked = currentConfig.display.docked_mode;
@@ -293,9 +294,17 @@ function renderPatchesTable() {
   if (!currentConfig || !patchesTableBody) return;
   patchesTableBody.innerHTML = "";
 
+  const patchHooks: Record<string, string> = {
+    patch_zero_heap: "f_80006a920 + 0x8008ac138",
+    patch_loose_romfs: "nn::fs::Rom",
+    patch_60fps_lock: "sead::Framework::calc",
+    patch_disable_drs: "agl::pdr::DRC",
+    patch_ultrawide: "sead::Camera",
+  };
+
   currentConfig.patches.forEach((patch, idx) => {
     const tr = document.createElement("tr");
-    tr.className = "hover";
+    tr.className = "hover border-b border-base-300";
 
     const tdCheck = document.createElement("td");
     tdCheck.className = "text-center";
@@ -310,11 +319,16 @@ function renderPatchesTable() {
     tdCheck.appendChild(chk);
 
     const tdName = document.createElement("td");
-    tdName.className = "font-medium text-xs font-mono";
-    tdName.innerText = patch.name;
+    const hookSymbol = patchHooks[patch.id] || "src/runtime/";
+    tdName.innerHTML = `
+      <div class="flex flex-col gap-0.5">
+        <span class="font-semibold text-xs text-[#EDE6D1]">${escapeHtml(patch.name)}</span>
+        <span class="badge badge-ghost font-mono text-[10px] text-[#63A7BC] border border-base-300/80 w-fit">${escapeHtml(hookSymbol)}</span>
+      </div>
+    `;
 
     const tdDesc = document.createElement("td");
-    tdDesc.className = "text-xs text-base-content/70";
+    tdDesc.className = "text-xs text-base-content/75";
     tdDesc.innerText = patch.description;
 
     tr.appendChild(tdCheck);
@@ -523,7 +537,7 @@ async function checkRomfs(path: string) {
 function updateRomfsUI(status: RomFsStatus) {
   if (status.status === "PackedVerified") {
     statRomfsStatus.innerText = "Packed ✓";
-    statRomfsStatus.className = "stat-value text-success text-2xl";
+    statRomfsStatus.className = "badge badge-sm badge-success text-[11px] font-mono";
     statRomfsDetail.innerText = `romfs.bin (${formatBytes(status.total_bytes)})`;
 
     setAlertStatus(checkVersion, true, "Ready in romfs.bin");
@@ -531,7 +545,7 @@ function updateRomfsUI(status: RomFsStatus) {
     setAlertStatus(checkShader, true, "Ready in romfs.bin");
   } else if (status.status === "LooseVerified") {
     statRomfsStatus.innerText = "Loose Ready";
-    statRomfsStatus.className = "stat-value text-primary text-2xl";
+    statRomfsStatus.className = "badge badge-sm badge-primary text-[11px] font-mono";
     statRomfsDetail.innerText = `${status.total_files} files (${formatBytes(status.total_bytes)})`;
 
     setAlertStatus(checkVersion, status.has_version, status.has_version ? "Found" : "Missing");
@@ -539,8 +553,8 @@ function updateRomfsUI(status: RomFsStatus) {
     setAlertStatus(checkShader, status.has_shader, status.has_shader ? "Found" : "Missing");
   } else {
     statRomfsStatus.innerText = "Missing";
-    statRomfsStatus.className = "stat-value text-error text-2xl";
-    statRomfsDetail.innerText = "Set RomFS directory below";
+    statRomfsStatus.className = "badge badge-sm badge-error text-[11px] font-mono";
+    statRomfsDetail.innerText = "Path not set";
 
     setAlertStatus(checkVersion, false, "Missing");
     setAlertStatus(checkPack, false, "Missing");
@@ -550,11 +564,14 @@ function updateRomfsUI(status: RomFsStatus) {
 
 function setAlertStatus(el: HTMLElement, ok: boolean, label: string) {
   if (!el) return;
-  el.className = `alert ${ok ? "alert-success" : "alert-error"} text-xs flex items-center justify-between p-3`;
+  el.className = `alert ${ok ? "border-[#2E8B57]/50 bg-[#12582C]/20" : "border-[#C93B3B]/40 bg-[#C93B3B]/10"} text-xs flex items-center justify-between p-3 rounded-sm border`;
   const icon = el.querySelector(".indicator-icon") as HTMLElement;
   const statusSpan = el.querySelector(".status-text") as HTMLElement;
   if (icon) icon.innerText = ok ? "✓" : "⚠️";
-  if (statusSpan) statusSpan.innerText = label;
+  if (statusSpan) {
+    statusSpan.className = `badge badge-sm ${ok ? "badge-success text-white" : "badge-error text-white"} font-mono text-[10px]`;
+    statusSpan.innerText = label;
+  }
 }
 
 btnBrowseRomfs?.addEventListener("click", async () => {
@@ -702,13 +719,13 @@ async function checkEngineStatus() {
 
 function updateEngineStateUI(st: EngineState) {
   if (st.is_running) {
-    statusBadge.className = "badge badge-success gap-2 font-mono text-xs py-3 px-3 animate-pulse";
-    statusBadge.innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-black"></span><span>Running PID ${st.pid}</span>`;
+    statusBadge.className = "badge badge-success gap-2 font-mono text-xs py-2.5 px-3 animate-pulse border border-[#2E8B57]";
+    statusBadge.innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-white"></span><span>Running PID ${st.pid}</span>`;
     btnLaunch.classList.add("hidden");
     btnStop.classList.remove("hidden");
     quickPidLabel.innerText = `PID: ${st.pid}`;
   } else {
-    statusBadge.className = "badge badge-ghost gap-2 font-mono text-xs py-3 px-3";
+    statusBadge.className = "badge badge-ghost gap-2 font-mono text-xs py-2.5 px-3 border border-base-300";
     statusBadge.innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-base-content/40"></span><span>Engine Idle</span>`;
     btnLaunch.classList.remove("hidden");
     btnStop.classList.add("hidden");
@@ -771,15 +788,15 @@ function appendLog(entry: EngineLogEntry) {
   if (!matchFilter || !matchSearch) return;
 
   const pre = document.createElement("pre");
-  let colorClass = "text-neutral-content/80";
-  if (entry.channel === "gfx") {
-    colorClass = "text-accent font-semibold";
-  } else if (entry.channel === "thread") {
-    colorClass = "text-warning font-semibold";
-  } else if (entry.channel === "error") {
-    colorClass = "text-error font-bold";
-  } else if (entry.channel === "info") {
-    colorClass = "text-primary/90";
+  let colorClass = "text-[#DCD09F]/80";
+  if (entry.channel === "gfx" || entry.text.includes("[totk-gfx]") || entry.text.includes("[NVN]")) {
+    colorClass = "text-[#63A7BC] font-semibold";
+  } else if (entry.channel === "thread" || entry.text.includes("[totk-thread]")) {
+    colorClass = "text-[#E8BF40] font-semibold";
+  } else if (entry.channel === "error" || entry.text.includes("signal") || entry.text.includes("SIGSEGV") || entry.text.includes("fault") || entry.text.includes("error") || entry.text.includes("Error")) {
+    colorClass = "text-[#C93B3B] font-bold";
+  } else if (entry.channel === "info" || entry.text.includes("[totk]")) {
+    colorClass = "text-[#DCD09F]";
   }
 
   pre.className = colorClass;

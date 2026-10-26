@@ -67,7 +67,7 @@ fn config_path() -> Result<PathBuf, String> {
 
 pub fn get_default_config() -> LauncherConfig {
     LauncherConfig {
-        theme: "zonai-dark".to_string(),
+        theme: "sky-island-dark".to_string(),
         romfs_path: "".to_string(),
         engine_binary_path: "".to_string(),
         display: DisplayConfig {
