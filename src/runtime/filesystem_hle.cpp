@@ -18,6 +18,12 @@ ZstdDecompressor::ZstdDecompressor() {
 }
 
 ZstdDecompressor::~ZstdDecompressor() {
+    for (auto &[_, d] : dict_map_) {
+        if (d) {
+            ZSTD_freeDDict(reinterpret_cast<ZSTD_DDict *>(d));
+        }
+    }
+    dict_map_.clear();
     if (ddict_) {
         ZSTD_freeDDict(reinterpret_cast<ZSTD_DDict *>(ddict_));
         ddict_ = nullptr;
@@ -41,6 +47,72 @@ bool ZstdDecompressor::load_dictionary(const void *dict_data, size_t dict_size) 
 
     ddict_ = ZSTD_createDDict(dict_buffer_.data(), dict_buffer_.size());
     return (ddict_ != nullptr);
+}
+
+bool ZstdDecompressor::load_dictionary_with_id(unsigned dict_id, const void *dict_data, size_t dict_size) {
+    if (!dict_data || dict_size == 0) return false;
+
+    dict_buffers_.emplace_back(reinterpret_cast<const uint8_t *>(dict_data),
+                               reinterpret_cast<const uint8_t *>(dict_data) + dict_size);
+    const auto &buf = dict_buffers_.back();
+    void *d = ZSTD_createDDict(buf.data(), buf.size());
+    if (!d) return false;
+
+    dict_map_[dict_id] = d;
+    return true;
+}
+
+bool ZstdDecompressor::load_dictionary_with_name(const std::string &name, const void *dict_data, size_t dict_size) {
+    if (!dict_data || dict_size == 0) return false;
+
+    dict_buffers_.emplace_back(reinterpret_cast<const uint8_t *>(dict_data),
+                               reinterpret_cast<const uint8_t *>(dict_data) + dict_size);
+    const auto &buf = dict_buffers_.back();
+    void *d = ZSTD_createDDict(buf.data(), buf.size());
+    if (!d) return false;
+
+    named_dict_map_[name] = d;
+    return true;
+}
+
+bool ZstdDecompressor::decompress_with_dict_id(unsigned dict_id, const void *src, size_t src_size, std::vector<uint8_t> &out_decompressed) {
+    auto it = dict_map_.find(dict_id);
+    if (it == dict_map_.end() || !it->second || !dctx_) return false;
+    unsigned long long const rSize = ZSTD_getFrameContentSize(src, src_size);
+    if (rSize == ZSTD_CONTENTSIZE_ERROR) return false;
+
+    size_t target_size = (rSize == ZSTD_CONTENTSIZE_UNKNOWN) ? (src_size * 4 + 65536) : static_cast<size_t>(rSize);
+    out_decompressed.resize(target_size);
+
+    size_t const dSize = ZSTD_decompress_usingDDict(
+        reinterpret_cast<ZSTD_DCtx *>(dctx_),
+        out_decompressed.data(), target_size,
+        src, src_size,
+        reinterpret_cast<const ZSTD_DDict *>(it->second)
+    );
+    if (ZSTD_isError(dSize)) return false;
+    out_decompressed.resize(dSize);
+    return true;
+}
+
+bool ZstdDecompressor::decompress_with_named_dict(const std::string &name, const void *src, size_t src_size, std::vector<uint8_t> &out_decompressed) {
+    auto it = named_dict_map_.find(name);
+    if (it == named_dict_map_.end() || !it->second || !dctx_) return false;
+    unsigned long long const rSize = ZSTD_getFrameContentSize(src, src_size);
+    if (rSize == ZSTD_CONTENTSIZE_ERROR) return false;
+
+    size_t target_size = (rSize == ZSTD_CONTENTSIZE_UNKNOWN) ? (src_size * 4 + 65536) : static_cast<size_t>(rSize);
+    out_decompressed.resize(target_size);
+
+    size_t const dSize = ZSTD_decompress_usingDDict(
+        reinterpret_cast<ZSTD_DCtx *>(dctx_),
+        out_decompressed.data(), target_size,
+        src, src_size,
+        reinterpret_cast<const ZSTD_DDict *>(it->second)
+    );
+    if (ZSTD_isError(dSize)) return false;
+    out_decompressed.resize(dSize);
+    return true;
 }
 
 bool ZstdDecompressor::decompress_frame(const void *src, size_t src_size, std::vector<uint8_t> &out_decompressed) {
@@ -72,11 +144,51 @@ bool ZstdDecompressor::compress_frame(const void *src, size_t src_size, std::vec
     return true;
 }
 
+bool ZstdDecompressor::compress_with_dict(const void *src, size_t src_size, const void *dict_data, size_t dict_size, std::vector<uint8_t> &out_compressed, int compression_level) {
+    if (!src || src_size == 0 || !dict_data || dict_size == 0) return false;
+
+    ZSTD_CDict *cdict = ZSTD_createCDict(dict_data, dict_size, compression_level);
+    if (!cdict) return false;
+
+    ZSTD_CCtx *cctx = ZSTD_createCCtx();
+    if (!cctx) {
+        ZSTD_freeCDict(cdict);
+        return false;
+    }
+
+    size_t const bound = ZSTD_compressBound(src_size);
+    out_compressed.resize(bound);
+
+    size_t const cSize = ZSTD_compress_usingCDict(cctx, out_compressed.data(), bound, src, src_size, cdict);
+    ZSTD_freeCCtx(cctx);
+    ZSTD_freeCDict(cdict);
+
+    if (ZSTD_isError(cSize)) return false;
+
+    out_compressed.resize(cSize);
+    return true;
+}
+
 bool ZstdDecompressor::decompress_with_dict(const void *src, size_t src_size, std::vector<uint8_t> &out_decompressed) {
     if (!src || src_size == 0) return false;
     if (!dctx_) return false;
 
-    if (!ddict_) {
+    unsigned dict_id = ZSTD_getDictID_fromFrame(src, src_size);
+    const void *active_ddict = nullptr;
+    if (dict_id != 0) {
+        auto it = dict_map_.find(dict_id);
+        if (it != dict_map_.end()) {
+            active_ddict = it->second;
+        }
+    }
+    if (!active_ddict) {
+        active_ddict = ddict_;
+    }
+    if (!active_ddict && !dict_map_.empty()) {
+        active_ddict = dict_map_.begin()->second;
+    }
+
+    if (!active_ddict) {
         return decompress_frame(src, src_size, out_decompressed);
     }
 
@@ -86,12 +198,25 @@ bool ZstdDecompressor::decompress_with_dict(const void *src, size_t src_size, st
     size_t target_size = (rSize == ZSTD_CONTENTSIZE_UNKNOWN) ? (src_size * 4 + 65536) : static_cast<size_t>(rSize);
     out_decompressed.resize(target_size);
 
-    size_t const dSize = ZSTD_decompress_usingDDict(
+    size_t dSize = ZSTD_decompress_usingDDict(
         reinterpret_cast<ZSTD_DCtx *>(dctx_),
         out_decompressed.data(), target_size,
         src, src_size,
-        reinterpret_cast<const ZSTD_DDict *>(ddict_)
+        reinterpret_cast<const ZSTD_DDict *>(active_ddict)
     );
+
+    if (ZSTD_isError(dSize) && !dict_map_.empty()) {
+        for (const auto &[_, d] : dict_map_) {
+            if (d == active_ddict) continue;
+            dSize = ZSTD_decompress_usingDDict(
+                reinterpret_cast<ZSTD_DCtx *>(dctx_),
+                out_decompressed.data(), target_size,
+                src, src_size,
+                reinterpret_cast<const ZSTD_DDict *>(d)
+            );
+            if (!ZSTD_isError(dSize)) break;
+        }
+    }
 
     if (ZSTD_isError(dSize)) return false;
 
@@ -535,15 +660,43 @@ bool FileSystemHLE::load_romfs_dictionary(const std::string &dict_guest_path) {
         return false;
     }
 
+    std::vector<uint8_t> uncompressed;
+    const uint8_t *payload_ptr = dict_raw.data();
+    size_t payload_size = dict_raw.size();
+
     // If dictionary itself is compressed (.zs), decompress it first
     if (dict_guest_path.size() >= 3 && dict_guest_path.substr(dict_guest_path.size() - 3) == ".zs") {
-        std::vector<uint8_t> uncompressed_dict;
-        if (ZstdDecompressor::decompress_frame(dict_raw.data(), dict_raw.size(), uncompressed_dict)) {
-            return zstd_.load_dictionary(uncompressed_dict.data(), uncompressed_dict.size());
+        if (ZstdDecompressor::decompress_frame(dict_raw.data(), dict_raw.size(), uncompressed)) {
+            payload_ptr = uncompressed.data();
+            payload_size = uncompressed.size();
         }
     }
 
-    return zstd_.load_dictionary(dict_raw.data(), dict_raw.size());
+    // Check if the payload is a SARC pack containing multiple dictionaries
+    if (payload_size >= 4 && std::memcmp(payload_ptr, "SARC", 4) == 0) {
+        SarcArchive sarc;
+        if (sarc.parse(payload_ptr, payload_size)) {
+            bool any_loaded = false;
+            unsigned auto_id = 1;
+            for (const auto &entry : sarc.get_entries()) {
+                const uint8_t *file_data = nullptr;
+                size_t file_size = 0;
+                if (sarc.get_file_view(entry.name, file_data, file_size) && file_size > 0) {
+                    unsigned dict_id = ZSTD_getDictID_fromDict(file_data, file_size);
+                    if (dict_id == 0) {
+                        dict_id = auto_id++;
+                    }
+                    if (zstd_.load_dictionary_with_id(dict_id, file_data, file_size)) {
+                        any_loaded = true;
+                    }
+                    zstd_.load_dictionary_with_name(entry.name, file_data, file_size);
+                }
+            }
+            if (any_loaded) return true;
+        }
+    }
+
+    return zstd_.load_dictionary(payload_ptr, payload_size);
 }
 
 bool FileSystemHLE::read_file(const std::string &host_path, uint64_t offset, size_t size, std::vector<uint8_t> &out_data) {

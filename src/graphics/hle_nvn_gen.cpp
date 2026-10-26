@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
+#include <atomic>
 #include <unordered_map>
 #include <string>
 #include "graphics/nvn_buffer_cache.h"
@@ -998,13 +999,27 @@ static uint64_t hle_nvnCommandBufferSetRasterizerDiscard(uint64_t x0 = 0, uint64
 
 static uint64_t hle_nvnCommandBufferSetRenderEnable(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x0; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *backend = VulkanBackend::get_active()) {
+        if (!x1) {
+            backend->get_recording_state_mut().recorded_conditional_renders++;
+            backend->get_conditional_render_mgr().begin_conditional_render(
+                backend->get_current_command_buffer(), 0, ConditionalRenderMode::RenderIfEqual);
+        } else {
+            backend->get_conditional_render_mgr().end_conditional_render(backend->get_current_command_buffer());
+        }
+    }
     return 0;
 }
 
 static uint64_t hle_nvnCommandBufferSetRenderEnableConditional(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x0; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->get_recording_state_mut().recorded_conditional_renders++;
+        backend->get_conditional_render_mgr().begin_conditional_render(
+            backend->get_current_command_buffer(), x2, static_cast<ConditionalRenderMode>(x1));
+    }
     return 0;
 }
 
@@ -1830,9 +1845,21 @@ static uint64_t hle_nvnQueueBuilderSetQueueMemory(uint64_t x0 = 0, uint64_t x1 =
     return 0;
 }
 
+struct NvnSyncInternal {
+    uint32_t magic = 0x434E5953; // 'SYNC'
+    uint32_t fenced = 0;
+    uint64_t fence_value = 0;
+};
+static std::atomic<uint64_t> s_fence_counter{1};
+
 static uint64_t hle_nvnQueueFenceSync(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x0; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    auto *s = reinterpret_cast<NvnSyncInternal *>(x1);
+    if (s) {
+        s->fenced = 1;
+        s->fence_value = ++s_fence_counter;
+    }
     return 0;
 }
 
@@ -2214,12 +2241,20 @@ static uint64_t hle_nvnSamplerSetDebugLabel(uint64_t x0 = 0, uint64_t x1 = 0, ui
 
 static uint64_t hle_nvnSyncFinalize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    auto *s = reinterpret_cast<NvnSyncInternal *>(x0);
+    if (s) s->magic = 0;
     return 0;
 }
 
 static uint32_t hle_nvnSyncInitialize(uint64_t sync, uint64_t dev) {
-    (void)sync; (void)dev;
+    (void)dev;
+    auto *s = reinterpret_cast<NvnSyncInternal *>(sync);
+    if (s) {
+        s->magic = 0x434E5953;
+        s->fenced = 0;
+        s->fence_value = 0;
+    }
     return 1;
 }
 
@@ -2230,7 +2265,11 @@ static uint64_t hle_nvnSyncSetDebugLabel(uint64_t x0 = 0, uint64_t x1 = 0, uint6
 }
 
 static int hle_nvnSyncWait(uint64_t sync, uint64_t timeout_ns) {
-    (void)sync; (void)timeout_ns;
+    (void)timeout_ns;
+    auto *s = reinterpret_cast<NvnSyncInternal *>(sync);
+    if (s && !s->fenced) {
+        return 1; // NVN_SYNC_WAIT_RESULT_TIMEOUT_EXPIRED
+    }
     return 0; // NVN_SYNC_WAIT_RESULT_ALREADY_SIGNALED
 }
 

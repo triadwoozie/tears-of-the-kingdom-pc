@@ -77,6 +77,7 @@ add_library(totk_recomp_runtime STATIC
     src/runtime/audio_hle.cpp
     src/runtime/video_hle.cpp
     src/runtime/module_loader.cpp
+    src/runtime/game_framework_hle.cpp
     ${PLATFORM_SOURCES}
 )
 target_include_directories(totk_recomp_runtime PUBLIC
@@ -110,6 +111,7 @@ add_library(totk_recomp_graphics STATIC
     src/graphics/nvn_conditional_draw.cpp
     src/graphics/nvn_texture_cache.cpp
     src/graphics/astc_decoder.cpp
+    src/graphics/bnsh_parser.cpp
 )
 target_include_directories(totk_recomp_graphics PUBLIC
     src/

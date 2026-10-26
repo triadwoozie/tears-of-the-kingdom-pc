@@ -237,6 +237,64 @@ void test_sarc_archive_indexing() {
     std::printf("  -> SARC Table of Contents Parser & Fast Hash Indexer: PASSED\n");
 }
 
+void test_zstd_multi_dictionary_pack() {
+    std::printf("[Test] Running test_zstd_multi_dictionary_pack...\n");
+    auto &fs = totk::runtime::FileSystemHLE::instance();
+    fs.mount_romfs("work/test_romfs");
+
+    // 1. Create two synthetic dictionaries
+    const std::string dict1_str = "ZSTD_DICTIONARY_PAYLOAD_ACTOR_SYSTEM_WORDS_V1";
+    const std::string dict2_str = "ZSTD_DICTIONARY_PAYLOAD_MAP_TERRAIN_TOPOLOGY_V2";
+
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> dict_files = {
+        {"zs/actor.dict", {dict1_str.begin(), dict1_str.end()}},
+        {"zs/terrain.dict", {dict2_str.begin(), dict2_str.end()}}
+    };
+
+    // Pack into SARC archive
+    std::vector<uint8_t> sarc_raw = totk::runtime::SarcArchive::create_archive(dict_files);
+    assert(!sarc_raw.empty());
+
+    // Compress with standard Zstd into ZsDic.pack.zs
+    std::vector<uint8_t> compressed_pack;
+    bool comp_pack_ok = totk::runtime::ZstdDecompressor::compress_frame(
+        sarc_raw.data(), sarc_raw.size(), compressed_pack, 3
+    );
+    assert(comp_pack_ok);
+
+    bool write_ok = fs.write_file("work/test_romfs/Pack/ZsDic.pack.zs", compressed_pack.data(), compressed_pack.size());
+    assert(write_ok);
+
+    // 2. Load dictionary pack into FileSystemHLE
+    bool load_ok = fs.load_romfs_dictionary("Pack/ZsDic.pack.zs");
+    assert(load_ok);
+    assert(fs.get_zstd_decompressor().has_dictionary());
+    assert(fs.get_zstd_decompressor().get_dictionary_count() >= 2);
+
+    // 3. Compress sample data using dictionary 1
+    const std::string test_payload = "Actor: Link (Player) equipment state with ZSTD_DICTIONARY_PAYLOAD_ACTOR_SYSTEM_WORDS_V1 compression";
+    std::vector<uint8_t> compressed_with_dict;
+    bool cdict_ok = totk::runtime::ZstdDecompressor::compress_with_dict(
+        test_payload.data(), test_payload.size(),
+        dict1_str.data(), dict1_str.size(),
+        compressed_with_dict, 3
+    );
+    assert(cdict_ok);
+    assert(!compressed_with_dict.empty());
+
+    // 4. Decompress via FileSystemHLE's loaded named dictionary
+    std::vector<uint8_t> decompressed_out;
+    bool ddict_ok = fs.get_zstd_decompressor().decompress_with_named_dict(
+        "zs/actor.dict",
+        compressed_with_dict.data(), compressed_with_dict.size(), decompressed_out
+    );
+    assert(ddict_ok);
+    assert(decompressed_out.size() == test_payload.size());
+    assert(std::memcmp(decompressed_out.data(), test_payload.data(), test_payload.size()) == 0);
+
+    std::printf("  -> Zstandard Multi-Dictionary Pack Loading & Decompression: PASSED\n");
+}
+
 int main() {
     std::printf("=====================================================\n");
     std::printf("  TotK-Recomp: Unit Test - FileSystem & IPC\n");
@@ -246,6 +304,7 @@ int main() {
     test_ipc_services();
     test_zstd_decompression_and_transparent_romfs();
     test_sarc_archive_indexing();
+    test_zstd_multi_dictionary_pack();
 
     std::printf("\nAll FileSystem and IPC verification tests PASSED!\n");
     return 0;

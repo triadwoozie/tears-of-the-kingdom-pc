@@ -49,3 +49,25 @@
   - Implemented `queue_submit_commands`, `queue_finish`, and `queue_flush` in `VulkanBackend` and tracked recording state in `CommandRecordingState`.
   - Wired HLE entrypoints `nvnQueueSubmitCommands`, `nvnQueueFinish`, and `nvnQueueFlush` to `VulkanBackend`.
   - Added unit test `test_queue_submission_and_synchronization` in `tests/test_nvn_vulkan.cpp`. All 10 CTests pass 100%.
+
+- **Task PC2-8: GameFrameworkNx Monotonic Timers & Event Progression Hooks**
+  - Implemented `src/runtime/game_framework_hle.h` and `src/runtime/game_framework_hle.cpp` with `register_game_framework_hooks()`.
+  - Registered monotonic 19.2 MHz hardware timer entry points: `nn::os::GetSystemTick`, `nn::os::GetSystemTickOrdered`, `nn::os::GetSystemTickFrequency`, `nnosGetSystemTick`, `nnosGetSystemTickOrdered`, and `nnosGetSystemTickFrequency`.
+  - Wired non-blocking Horizon system event hooks (`nn::os::WaitSystemEvent`, `nnosWaitSystemEvent`, `nn::os::TryWaitSystemEvent`, `nnosTryWaitSystemEvent`, `nn::os::TimedWaitSystemEvent`, `nnosTimedWaitSystemEvent`, `nn::oe::GetNotificationMessageEvent`, and `nn::os::AttachReadableHandleToSystemEvent`).
+  - Wired `nn::vi::GetDisplayVsyncEvent` in `src/main.cpp` with initialized auto-clear event handle preventing main loop deadlock.
+
+- **Task PC2-9: NVN Surface Presentation & Non-Blocking NVNsync**
+  - Wired `hle_nvnQueueFenceSync` and `hle_nvnSyncWait` in `src/graphics/hle_nvn_gen.cpp` returning `NVN_SYNC_WAIT_RESULT_ALREADY_SIGNALED` (0) without stalling render threads.
+  - Connected `hle_nvnCommandBufferSetRenderEnableConditional` and `hle_nvnCommandBufferSetRenderEnable` to `NvnConditionalRenderManager`.
+  - Added synthetic 10-Frame `GameFrameworkNx` Render Loop Simulation in `tests/test_nvn_vulkan.cpp` verifying window acquire, uniform buffer update, draw, submit, fence sync, and present across 10 consecutive frames.
+
+- **Task PC2-10: Binary Nintendo Shader (.bnsh) Header Parser & Fallback SPIR-V Pipeline**
+  - Implemented `src/graphics/bnsh_parser.h` and `src/graphics/bnsh_parser.cpp` with `validate_header`, `parse`, and `create_synthetic_bnsh`.
+  - Embedded minimal valid SPIR-V 1.0 passthrough vertex and fragment shader bytecode (`s_fallback_vs_spv`, `s_fallback_fs_spv`).
+  - Added `create_fallback_pipeline` ensuring `vkCreateGraphicsPipelines` produces valid pipeline handles.
+  - Added unit test `test_bnsh_parsing_and_fallback_pipeline` in `tests/test_nvn_vulkan.cpp`.
+
+- **Task PC2-11: Multi-Dictionary Zstd Pack Loading & Full ASTC Footprint Transcoding**
+  - Upgraded `ZstdDecompressor` and `FileSystemHLE::load_romfs_dictionary` to support multi-dictionary SARC pack extraction (`ZsDic.pack.zs`) by ID and by filename (`decompress_with_named_dict`, `decompress_with_dict_id`).
+  - Upgraded `AstcDecoder` and `NvnTextureCache` to support all Switch ASTC footprint dimensions (4x4 through 12x12) with sRGB-to-linear gamma conversion.
+  - Added unit tests `test_zstd_multi_dictionary_pack` in `tests/test_fs_ipc.cpp` and `test_astc_all_supported_dimensions`, `test_astc_srgb_conversion` in `tests/test_astc_decoder.cpp`. All 10 CTests pass 100%.

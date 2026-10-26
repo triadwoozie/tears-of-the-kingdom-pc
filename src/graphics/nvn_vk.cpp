@@ -867,6 +867,8 @@ bool VulkanBackend::present_texture(uint64_t queue, uint64_t window, int texture
     (void)window;
     (void)texture_index;
 
+    rec_state_.recorded_presents++;
+
     if (offscreen_hdr_image_ != VK_NULL_HANDLE || offscreen_hdr_format_ != VK_FORMAT_UNDEFINED) {
         blit_hdr_to_swapchain(offscreen_hdr_image_, offscreen_hdr_format_, offscreen_hdr_width_, offscreen_hdr_height_);
     }

@@ -11,6 +11,8 @@
 #endif
 #include "volk.h"
 #include <SDL3/SDL.h>
+#include "graphics/nvn_conditional_draw.h"
+#include "graphics/nvn_uniform_snapshot.h"
 
 namespace totk::graphics {
 
@@ -76,6 +78,8 @@ struct CommandRecordingState {
     uint64_t recorded_submits = 0;
     uint64_t recorded_finishes = 0;
     uint64_t recorded_flushes = 0;
+    uint64_t recorded_presents = 0;
+    uint64_t recorded_conditional_renders = 0;
 };
 
 class VulkanBackend {
@@ -122,6 +126,11 @@ public:
     void queue_flush();
 
     bool present_texture(uint64_t queue, uint64_t window, int texture_index);
+
+    NvnConditionalRenderManager &get_conditional_render_mgr() { return cond_mgr_; }
+    const NvnConditionalRenderManager &get_conditional_render_mgr() const { return cond_mgr_; }
+    NvnUniformSnapshotRing &get_uniform_ring() { return uniform_ring_; }
+    const NvnUniformSnapshotRing &get_uniform_ring() const { return uniform_ring_; }
 
     const CommandRecordingState &get_recording_state() const { return rec_state_; }
     CommandRecordingState &get_recording_state_mut() { return rec_state_; }
@@ -220,6 +229,8 @@ private:
     bool initialized_ = false;
     bool is_mock_ = false;
     CommandRecordingState rec_state_{};
+    NvnConditionalRenderManager cond_mgr_;
+    NvnUniformSnapshotRing uniform_ring_;
 };
 
 } // namespace totk::graphics

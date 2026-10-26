@@ -29,22 +29,31 @@ public:
 
     // Load a dictionary buffer (e.g. from ZsDic.pack.zs or uncompressed dictionary data)
     bool load_dictionary(const void *dict_data, size_t dict_size);
+    bool load_dictionary_with_id(unsigned dict_id, const void *dict_data, size_t dict_size);
+    bool load_dictionary_with_name(const std::string &name, const void *dict_data, size_t dict_size);
 
     // Decompress a standard Zstd frame into out_decompressed
     static bool decompress_frame(const void *src, size_t src_size, std::vector<uint8_t> &out_decompressed);
 
     // Compress data into a Zstd frame (convenience for tests)
     static bool compress_frame(const void *src, size_t src_size, std::vector<uint8_t> &out_compressed, int compression_level = 3);
+    static bool compress_with_dict(const void *src, size_t src_size, const void *dict_data, size_t dict_size, std::vector<uint8_t> &out_compressed, int compression_level = 3);
 
-    // Decompress using loaded dictionary
+    // Decompress using loaded dictionary, frame-referenced dict_id, or named dictionary
     bool decompress_with_dict(const void *src, size_t src_size, std::vector<uint8_t> &out_decompressed);
+    bool decompress_with_dict_id(unsigned dict_id, const void *src, size_t src_size, std::vector<uint8_t> &out_decompressed);
+    bool decompress_with_named_dict(const std::string &name, const void *src, size_t src_size, std::vector<uint8_t> &out_decompressed);
 
-    bool has_dictionary() const { return ddict_ != nullptr; }
+    bool has_dictionary() const { return ddict_ != nullptr || !dict_map_.empty(); }
+    size_t get_dictionary_count() const { return dict_map_.size() + (ddict_ ? 1 : 0); }
 
 private:
     void *dctx_ = nullptr;
     void *ddict_ = nullptr;
     std::vector<uint8_t> dict_buffer_;
+    std::unordered_map<unsigned, void *> dict_map_;
+    std::unordered_map<std::string, void *> named_dict_map_;
+    std::vector<std::vector<uint8_t>> dict_buffers_;
 };
 
 inline uint32_t sarc_hash(std::string_view name, uint32_t hash_key = 0x65) {

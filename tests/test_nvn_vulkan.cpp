@@ -2,6 +2,7 @@
 #include "graphics/nvn_buffer_cache.h"
 #include "graphics/nvn_conditional_draw.h"
 #include "graphics/vk_pipeline_cache.h"
+#include "graphics/bnsh_parser.h"
 #include "graphics/nvn_vk.h"
 #include "graphics/hle_nvn_gen.h"
 #include <cassert>
@@ -283,6 +284,163 @@ void test_queue_submission_and_synchronization() {
     std::printf("  -> NVN Queue Submission & Synchronization: PASSED\n");
 }
 
+void test_gameframework_render_loop_10_frames() {
+    std::printf("[Test] Running test_gameframework_render_loop_10_frames...\n");
+    totk::graphics::VulkanBackend backend;
+    bool init_ok = backend.initialize_mock();
+    assert(init_ok);
+
+    // Function pointers resolved via nvn_get_proc_address
+    using WindowInitFn = uint64_t (*)(uint64_t, uint64_t);
+    using WindowAcquireFn = uint64_t (*)(uint64_t, uint64_t, uint64_t);
+    using PresentFn = void (*)(uint64_t, uint64_t, int);
+    using FenceSyncFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t);
+    using SyncWaitFn = int (*)(uint64_t, uint64_t);
+    using SyncInitFn = uint32_t (*)(uint64_t, uint64_t);
+
+    auto win_init = reinterpret_cast<WindowInitFn>(totk::graphics::nvn_get_proc_address("nvnWindowInitialize"));
+    auto win_acquire = reinterpret_cast<WindowAcquireFn>(totk::graphics::nvn_get_proc_address("nvnWindowAcquireTexture"));
+    auto present_fn = reinterpret_cast<PresentFn>(totk::graphics::nvn_get_proc_address("nvnQueuePresentTexture"));
+    auto fence_sync = reinterpret_cast<FenceSyncFn>(totk::graphics::nvn_get_proc_address("nvnQueueFenceSync"));
+    auto sync_wait = reinterpret_cast<SyncWaitFn>(totk::graphics::nvn_get_proc_address("nvnSyncWait"));
+    auto sync_init = reinterpret_cast<SyncInitFn>(totk::graphics::nvn_get_proc_address("nvnSyncInitialize"));
+
+    assert(win_init && win_acquire && present_fn && fence_sync && sync_wait && sync_init);
+
+    // Initialize mock window with 3 swapchain textures
+    struct MockBuilder {
+        void *device = nullptr;
+        void *native_win = nullptr;
+        int num_textures = 3;
+        void *textures[8]{(void *)0x10, (void *)0x20, (void *)0x30};
+        int present_interval = 1;
+    } builder;
+
+    struct alignas(8) MockWindow {
+        uint32_t magic;
+        void *native_win;
+        int num_textures;
+        void *textures[8];
+        int present_interval;
+        int next_texture_idx;
+    } window{};
+
+    win_init(reinterpret_cast<uint64_t>(&window), reinterpret_cast<uint64_t>(&builder));
+    assert(window.num_textures == 3);
+
+    // Initialize NVNsync object
+    uint64_t sync_obj[4]{};
+    sync_init(reinterpret_cast<uint64_t>(sync_obj), 0);
+
+    // Run 10 consecutive GameFrameworkNx frames
+    uint64_t initial_presents = totk::graphics::get_presented_frame_count();
+    for (int frame = 0; frame < 10; ++frame) {
+        int texture_idx = -1;
+        win_acquire(reinterpret_cast<uint64_t>(&window), 0, reinterpret_cast<uint64_t>(&texture_idx));
+        assert(texture_idx >= 0 && texture_idx < 3);
+
+        backend.begin_command_recording();
+        backend.cmd_set_viewport(0, 0, 1920, 1080);
+        backend.cmd_set_scissor(0, 0, 1920, 1080);
+
+        // Update camera / game view uniforms
+        float frame_data[4] = {static_cast<float>(frame), 16.666f, 1920.0f, 1080.0f};
+        backend.cmd_update_uniform_buffer(0, 0, frame_data, sizeof(frame_data));
+
+        // Draw HUD / game world geometry
+        backend.cmd_draw(6, 1, 0, 0);
+        backend.end_command_recording();
+
+        // Queue submission & synchronization
+        backend.queue_submit_commands(1, nullptr);
+        fence_sync(0, reinterpret_cast<uint64_t>(sync_obj), 0, 0);
+
+        int wait_res = sync_wait(reinterpret_cast<uint64_t>(sync_obj), 1000000000ULL);
+        assert(wait_res == 0); // NVN_SYNC_WAIT_RESULT_ALREADY_SIGNALED
+
+        // Present to display
+        present_fn(0, reinterpret_cast<uint64_t>(&window), texture_idx);
+    }
+
+    assert(totk::graphics::get_presented_frame_count() >= initial_presents + 10);
+    assert(backend.get_recording_state().recorded_presents >= 10);
+
+    backend.shutdown();
+    std::printf("  -> Synthetic 10-Frame GameFrameworkNx Render Loop: PASSED\n");
+}
+
+void test_bnsh_parsing_and_fallback_pipeline() {
+    std::printf("[Test] Running test_bnsh_parsing_and_fallback_pipeline...\n");
+
+    // 1. Create a synthetic BNSH container with Vertex, Fragment, and Compute stages
+    totk::graphics::BnshProgram prog;
+    prog.program_id = 0;
+
+    totk::graphics::BnshStageData vs_stage;
+    vs_stage.stage = totk::graphics::BnshStageKind::Vertex;
+    vs_stage.control_bytes = {0x01, 0x02, 0x03, 0x04};
+    vs_stage.code_bytes = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
+    prog.stages.push_back(vs_stage);
+
+    totk::graphics::BnshStageData fs_stage;
+    fs_stage.stage = totk::graphics::BnshStageKind::Fragment;
+    fs_stage.control_bytes = {0x05, 0x06, 0x07, 0x08};
+    fs_stage.code_bytes = {0xaa, 0xbb, 0xcc, 0xdd};
+    prog.stages.push_back(fs_stage);
+
+    totk::graphics::BnshStageData cs_stage;
+    cs_stage.stage = totk::graphics::BnshStageKind::Compute;
+    cs_stage.control_bytes.resize(0x760, 0);
+    // Write compute workgroup (8, 8, 1, 2048 bytes shared memory) at offset 0x748
+    uint32_t *wg = reinterpret_cast<uint32_t *>(cs_stage.control_bytes.data() + 0x748);
+    wg[0] = 8;
+    wg[1] = 8;
+    wg[2] = 1;
+    wg[3] = 2048;
+    cs_stage.code_bytes = {0x99, 0x88, 0x77, 0x66};
+    prog.stages.push_back(cs_stage);
+
+    std::vector<totk::graphics::BnshProgram> input_progs = {prog};
+    std::vector<uint8_t> bnsh_bytes = totk::graphics::BnshParser::create_synthetic_bnsh(input_progs);
+    assert(!bnsh_bytes.empty());
+
+    // 2. Parse back and validate
+    assert(totk::graphics::BnshParser::validate_header(bnsh_bytes.data(), bnsh_bytes.size()));
+
+    std::vector<totk::graphics::BnshProgram> parsed_progs;
+    bool parse_ok = totk::graphics::BnshParser::parse(bnsh_bytes.data(), bnsh_bytes.size(), parsed_progs);
+    assert(parse_ok);
+    assert(parsed_progs.size() == 1);
+    assert(parsed_progs[0].has_vertex);
+    assert(parsed_progs[0].has_fragment);
+    assert(parsed_progs[0].has_compute);
+    assert(parsed_progs[0].stages.size() == 3);
+
+    // Verify stage contents
+    assert(parsed_progs[0].stages[0].code_bytes == vs_stage.code_bytes);
+    assert(parsed_progs[0].stages[1].code_bytes == fs_stage.code_bytes);
+    assert(parsed_progs[0].stages[2].workgroup_x == 8);
+    assert(parsed_progs[0].stages[2].workgroup_y == 8);
+    assert(parsed_progs[0].stages[2].workgroup_z == 1);
+    assert(parsed_progs[0].stages[2].shared_memory_bytes == 2048);
+
+    // 3. Fallback Pipeline Creation
+    size_t vs_words = 0, fs_words = 0;
+    const uint32_t *vs_spv = totk::graphics::BnshParser::get_fallback_vertex_spirv(vs_words);
+    const uint32_t *fs_spv = totk::graphics::BnshParser::get_fallback_fragment_spirv(fs_words);
+    assert(vs_spv != nullptr && vs_words > 0);
+    assert(fs_spv != nullptr && fs_words > 0);
+    assert(vs_spv[0] == 0x07230203);
+    assert(fs_spv[0] == 0x07230203);
+
+    VkPipeline fallback_pso = totk::graphics::BnshParser::create_fallback_pipeline(
+        VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, 1920, 1080
+    );
+    assert(fallback_pso != VK_NULL_HANDLE);
+
+    std::printf("  -> BNSH Header Parser & Fallback SPIR-V Pipeline: PASSED\n");
+}
+
 int main() {
     std::printf("==================================================\n");
     std::printf("  NVN-to-Vulkan 1.3 Subsystems Unit Tests\n");
@@ -295,6 +453,8 @@ int main() {
     test_vulkan_command_recording_and_presentation();
     test_dynamic_render_targets_and_hdr_blit();
     test_queue_submission_and_synchronization();
+    test_gameframework_render_loop_10_frames();
+    test_bnsh_parsing_and_fallback_pipeline();
 
     std::printf("\nAll NVN-to-Vulkan unit tests PASSED successfully!\n");
     return 0;

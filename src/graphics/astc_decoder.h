@@ -25,7 +25,8 @@ public:
         uint32_t height,
         uint32_t block_w,
         uint32_t block_h,
-        uint8_t *out_rgba
+        uint8_t *out_rgba,
+        bool is_srgb = false
     );
 
     // Decompress a single 16-byte ASTC block into an RGBA8 buffer with specified row pitch
@@ -34,7 +35,8 @@ public:
         uint32_t block_w,
         uint32_t block_h,
         uint8_t *out_block_pixels,
-        uint32_t row_pitch_bytes
+        uint32_t row_pitch_bytes,
+        bool is_srgb = false
     );
 
     // Helper: generate a synthetic void-extent ASTC block (solid color)

@@ -106,6 +106,7 @@ fatal_crash:
 #include "recompiler/dispatch.h"
 #include "runtime/audio_hle.h"
 #include "runtime/filesystem_hle.h"
+#include "runtime/game_framework_hle.h"
 #include "runtime/guest_abi/nn_hid_abi.h"
 #include "runtime/hlr_sead.h"
 #include "runtime/kernel_hle.h"
@@ -441,6 +442,7 @@ static int run_boot_real(const std::string &entry_symbol) {
 
     // Register permanent HLR hooks for sead heaps, fallback bump allocators, and math
     totk::hlr::register_sead_hlr_hooks();
+    totk::runtime::register_game_framework_hooks();
 
     // Hook diag Abort handlers to catch exact assertion failures
     totk::recompiler::register_recompiled_func(0x710c09bca0ULL, [](totk::recompiler::Arm64Context *c) {
@@ -850,7 +852,14 @@ static int run_boot_real(const std::string &entry_symbol) {
 
     // Hook nn::vi::GetDisplayVsyncEvent (0x710c4504b0)
     totk::recompiler::register_recompiled_func(0x710c4504b0ULL, [](totk::recompiler::Arm64Context *c) {
-        std::printf("  [HLE nn::vi::GetDisplayVsyncEvent] Called\n");
+        std::printf("  [HLE nn::vi::GetDisplayVsyncEvent] Called event=%p\n", reinterpret_cast<void *>(c->x[0]));
+        uint32_t *ev = reinterpret_cast<uint32_t *>(c->x[0]);
+        if (ev) {
+            ev[0] = 1;          // state = 1 (Initialized)
+            ev[1] = 0x01010101; // auto_clear=1, readable_managed=1, writable_managed=1
+            ev[2] = 0x20001;    // readable handle
+            ev[3] = 0x20002;    // writable handle
+        }
         c->x[0] = 0;
     });
 
