@@ -1,22 +1,22 @@
-Remote commit: 3ae332be29e440cd324620958fab23c14efd80cb
-Boot exit status: 139
-  [IPC Dispatch] handle=0x10001 kind=sm: cmd=1 ctrl=0 dom=0 (raw cmif: 0x0)
-  [IPC Dispatch] handle=0x1000c kind=acc:u0 cmd=160 ctrl=0 dom=1 (raw cmif: 0x30)
-  [IPC Dispatch] handle=0x1000c kind=acc:u0 cmd=150 ctrl=0 dom=1 (raw cmif: 0x20)
-  [Kernel HLE svcSignalToAddress] th=0x1 (MainThread) addr=0x722346fdc0 type=1 val=1 count=-1
-  [IPC Dispatch] handle=0x10001 kind=sm: cmd=1 ctrl=0 dom=0 (raw cmif: 0x0)
-  [IPC Dispatch] handle=0x1000d kind=sm: cmd=21 ctrl=0 dom=0 (raw cmif: 0x20)
-  [IPC Dispatch] handle=0x1000d kind=sm: cmd=31 ctrl=0 dom=0 (raw cmif: 0x20)
-  [Kernel HLE svcSignalToAddress] th=0x1 (MainThread) addr=0x722346fdc0 type=1 val=1 count=-1
-  - Thread 0x1 (MainThread) [Running]: PC=0x7104064db0 LR=0x71046b7b20 SP=0x708033d250
-  - Thread 0x1 (MainThread) [Running]: PC=0x7104064db0 LR=0x71046b7b20 SP=0x708033d250
-  - Thread 0x1 (MainThread) [Running]: PC=0x7104c6486c LR=0x71046b778c SP=0x708033d270
-  - Thread 0x1 (MainThread) [Running]: PC=0x7104c6486c LR=0x71046b778c SP=0x708033d270
-  [IPC Dispatch] handle=0x10001 kind=sm: cmd=1 ctrl=0 dom=0 (raw cmif: 0x0)
-  [IPC Dispatch] handle=0x1000e kind=audren:u cmd=1 ctrl=0 dom=0 (raw cmif: 0x10)
-  [IPC Dispatch] handle=0x1000e kind=audren:u cmd=0 ctrl=0 dom=0 (raw cmif: 0x20)
-  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=7 ctrl=0 dom=0 (raw cmif: 0x10)
-  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=5 ctrl=0 dom=0 (raw cmif: 0x10)
+Remote commit: 979f9e0e6f2683e526d51ea6babfb15b2269a927
+Boot exit status: 124
   [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
-[DIAG VAbortImpl] Called!
-  Result: 0x00005299 (Module=153, Description=41)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000f kind=audio-renderer cmd=4 ctrl=0 dom=0 (raw cmif: 0x30)
