@@ -3,6 +3,7 @@
 #include <cstring>
 #include <cstdint>
 #include <atomic>
+#include <chrono>
 #include <unordered_map>
 #include <string>
 #include "graphics/nvn_buffer_cache.h"
@@ -834,21 +835,30 @@ static uint64_t hle_nvnCommandBufferPushDebugGroupStatic(uint64_t x0 = 0, uint64
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferReportCounter(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferReportCounter(uint64_t cb = 0, uint64_t counter_type = 0, uint64_t dest_addr = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)counter_type; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (dest_addr) {
+        auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        uint64_t payload[2] = {1000ULL, static_cast<uint64_t>(now_ns)};
+        std::memcpy(reinterpret_cast<void *>(dest_addr), payload, sizeof(payload));
+    }
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferReportValue(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferReportValue(uint64_t cb = 0, uint64_t dest_addr = 0, uint64_t val = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (dest_addr) {
+        *reinterpret_cast<uint32_t *>(dest_addr) = static_cast<uint32_t>(val);
+    }
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferResetCounter(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferResetCounter(uint64_t cb = 0, uint64_t counter_type = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)counter_type; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
     return 0;
 }
 
@@ -2064,9 +2074,12 @@ static uint64_t hle_nvnSamplerBuilderSetCompare(uint64_t x0 = 0, uint64_t x1 = 0
     return 0;
 }
 
-static uint64_t hle_nvnSamplerBuilderSetDefaults(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerBuilderSetDefaults(uint64_t b = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (b) {
+        new (reinterpret_cast<void *>(b)) NvnSamplerBuilderInternal();
+    }
     return 0;
 }
 
@@ -2076,15 +2089,30 @@ static uint64_t hle_nvnSamplerBuilderSetDevice(uint64_t x0 = 0, uint64_t x1 = 0,
     return 0;
 }
 
-static uint64_t hle_nvnSamplerBuilderSetLodBias(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerBuilderSetLodBias(uint64_t b = 0, uint64_t bias_bits = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *sb = reinterpret_cast<NvnSamplerBuilderInternal *>(b)) {
+        float f = 0.0f;
+        uint32_t u = static_cast<uint32_t>(bias_bits);
+        std::memcpy(&f, &u, sizeof(f));
+        sb->lod_bias = f;
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerBuilderSetLodClamp(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerBuilderSetLodClamp(uint64_t b = 0, uint64_t min_bits = 0, uint64_t max_bits = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *sb = reinterpret_cast<NvnSamplerBuilderInternal *>(b)) {
+        float fmin = 0.0f, fmax = 1000.0f;
+        uint32_t umin = static_cast<uint32_t>(min_bits);
+        uint32_t umax = static_cast<uint32_t>(max_bits);
+        std::memcpy(&fmin, &umin, sizeof(fmin));
+        std::memcpy(&fmax, &umax, sizeof(fmax));
+        sb->lod_min = fmin;
+        sb->lod_max = fmax;
+    }
     return 0;
 }
 
@@ -2094,27 +2122,45 @@ static uint64_t hle_nvnSamplerBuilderSetLodSnap(uint64_t x0 = 0, uint64_t x1 = 0
     return 0;
 }
 
-static uint64_t hle_nvnSamplerBuilderSetMaxAnisotropy(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerBuilderSetMaxAnisotropy(uint64_t b = 0, uint64_t aniso_bits = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *sb = reinterpret_cast<NvnSamplerBuilderInternal *>(b)) {
+        float f = 1.0f;
+        uint32_t u = static_cast<uint32_t>(aniso_bits);
+        std::memcpy(&f, &u, sizeof(f));
+        sb->max_anisotropy = f;
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerBuilderSetMinMagFilter(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerBuilderSetMinMagFilter(uint64_t b = 0, uint64_t min_f = 0, uint64_t mag_f = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *sb = reinterpret_cast<NvnSamplerBuilderInternal *>(b)) {
+        sb->min_filter = static_cast<uint32_t>(min_f);
+        sb->mag_filter = static_cast<uint32_t>(mag_f);
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerBuilderSetReductionFilter(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerBuilderSetReductionFilter(uint64_t b = 0, uint64_t filter = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *sb = reinterpret_cast<NvnSamplerBuilderInternal *>(b)) {
+        sb->reduction_filter = static_cast<uint32_t>(filter);
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerBuilderSetWrapMode(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerBuilderSetWrapMode(uint64_t b = 0, uint64_t s = 0, uint64_t t = 0, uint64_t r = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *sb = reinterpret_cast<NvnSamplerBuilderInternal *>(b)) {
+        sb->wrap_s = static_cast<uint32_t>(s);
+        sb->wrap_t = static_cast<uint32_t>(t);
+        sb->wrap_r = static_cast<uint32_t>(r);
+    }
     return 0;
 }
 
@@ -2160,45 +2206,82 @@ static uint64_t hle_nvnSamplerGetDebugID(uint64_t x0 = 0, uint64_t x1 = 0, uint6
     return 0;
 }
 
-static uint64_t hle_nvnSamplerGetLodBias(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerGetLodBias(uint64_t s = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *samp = reinterpret_cast<NvnSamplerInternal *>(s)) {
+        float f = samp->desc.lod_bias;
+        uint32_t u;
+        std::memcpy(&u, &f, sizeof(u));
+        return u;
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerGetLodClamp(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerGetLodClamp(uint64_t s = 0, uint64_t out_min = 0, uint64_t out_max = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *samp = reinterpret_cast<NvnSamplerInternal *>(s)) {
+        if (out_min) *reinterpret_cast<float *>(out_min) = samp->desc.lod_min;
+        if (out_max) *reinterpret_cast<float *>(out_max) = samp->desc.lod_max;
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerGetMaxAnisotropy(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerGetMaxAnisotropy(uint64_t s = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *samp = reinterpret_cast<NvnSamplerInternal *>(s)) {
+        float f = samp->desc.max_anisotropy;
+        uint32_t u;
+        std::memcpy(&u, &f, sizeof(u));
+        return u;
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerGetMinMagFilter(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerGetMinMagFilter(uint64_t s = 0, uint64_t out_min = 0, uint64_t out_mag = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *samp = reinterpret_cast<NvnSamplerInternal *>(s)) {
+        if (out_min) *reinterpret_cast<uint32_t *>(out_min) = samp->desc.min_filter;
+        if (out_mag) *reinterpret_cast<uint32_t *>(out_mag) = samp->desc.mag_filter;
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerGetReductionFilter(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerGetReductionFilter(uint64_t s = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *samp = reinterpret_cast<NvnSamplerInternal *>(s)) {
+        return samp->desc.reduction_filter;
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerGetWrapMode(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerGetWrapMode(uint64_t s = 0, uint64_t out_s = 0, uint64_t out_t = 0, uint64_t out_r = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *samp = reinterpret_cast<NvnSamplerInternal *>(s)) {
+        if (out_s) *reinterpret_cast<uint32_t *>(out_s) = samp->desc.wrap_s;
+        if (out_t) *reinterpret_cast<uint32_t *>(out_t) = samp->desc.wrap_t;
+        if (out_r) *reinterpret_cast<uint32_t *>(out_r) = samp->desc.wrap_r;
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerInitialize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerInitialize(uint64_t s = 0, uint64_t b = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (s) {
+        auto *samp = reinterpret_cast<NvnSamplerInternal *>(s);
+        if (b) {
+            samp->desc = *reinterpret_cast<const NvnSamplerBuilderInternal *>(b);
+        }
+        static uint32_t s_sampler_id_gen = 1;
+        samp->sampler_id = s_sampler_id_gen++;
+        NvnBindlessManager::instance().register_sampler(samp->sampler_id, s, VK_NULL_HANDLE);
+    }
     return 1; // NVNboolean true
 }
 

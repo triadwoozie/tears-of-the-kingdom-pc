@@ -29,6 +29,29 @@ struct SamplerDescriptorEntry {
     bool is_valid = false;
 };
 
+struct NvnSamplerBuilderInternal {
+    uint32_t min_filter = 1; // LINEAR
+    uint32_t mag_filter = 1; // LINEAR
+    uint32_t mip_filter = 1; // LINEAR
+    uint32_t wrap_s = 0;     // CLAMP_TO_EDGE
+    uint32_t wrap_t = 0;
+    uint32_t wrap_r = 0;
+    float lod_min = 0.0f;
+    float lod_max = 1000.0f;
+    float lod_bias = 0.0f;
+    float max_anisotropy = 1.0f;
+    uint32_t compare_mode = 0;
+    uint32_t compare_func = 0;
+    uint32_t reduction_filter = 0; // AVERAGE
+    float border_color[4]{0.0f, 0.0f, 0.0f, 0.0f};
+};
+
+struct NvnSamplerInternal {
+    NvnSamplerBuilderInternal desc{};
+    VkSampler vk_sampler = VK_NULL_HANDLE;
+    uint32_t sampler_id = 0;
+};
+
 class NvnBindlessManager {
 public:
     static constexpr uint32_t MAX_BINDLESS_TEXTURES = 4096;

@@ -806,6 +806,79 @@ void test_compute_views_and_bc_decoders() {
     std::printf("  -> Compute Dispatch, Texture Views & BC Decoders (BC1-BC7): PASSED\n");
 }
 
+void test_sampler_builder_and_gpu_queries() {
+    std::printf("[Test] Running test_sampler_builder_and_gpu_queries...\n");
+
+    // 1. Test GPU Query Reporting: nvnCommandBufferReportCounter & ReportValue
+    using ReportCounterFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    using ReportValueFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+
+    auto pfn_report_counter = reinterpret_cast<ReportCounterFn>(totk::graphics::nvn_get_proc_address("nvnCommandBufferReportCounter"));
+    auto pfn_report_value = reinterpret_cast<ReportValueFn>(totk::graphics::nvn_get_proc_address("nvnCommandBufferReportValue"));
+
+    assert(pfn_report_counter != nullptr);
+    assert(pfn_report_value != nullptr);
+
+    uint64_t counter_mem[2] = {0, 0};
+    pfn_report_counter(0, 1 /* TIMESTAMP */, reinterpret_cast<uint64_t>(counter_mem), 0, 0, 0, 0, 0);
+    assert(counter_mem[0] == 1000ULL);
+    assert(counter_mem[1] > 0); // Non-zero nanosecond timestamp
+
+    uint32_t value_mem = 0;
+    pfn_report_value(0, reinterpret_cast<uint64_t>(&value_mem), 0xCAFE, 0, 0, 0, 0, 0);
+    assert(value_mem == 0xCAFE);
+
+    // 2. Test Sampler Builder & Sampler Lifecycle
+    totk::graphics::NvnSamplerBuilderInternal builder{};
+    using SamplerSetDefaultsFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    using SamplerSetFilterFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    using SamplerSetWrapFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    using SamplerSetReductionFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    using SamplerInitFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    using SamplerGetFilterFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    using SamplerGetWrapFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    using SamplerGetReductionFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+
+    auto pfn_set_defaults = reinterpret_cast<SamplerSetDefaultsFn>(totk::graphics::nvn_get_proc_address("nvnSamplerBuilderSetDefaults"));
+    auto pfn_set_filter = reinterpret_cast<SamplerSetFilterFn>(totk::graphics::nvn_get_proc_address("nvnSamplerBuilderSetMinMagFilter"));
+    auto pfn_set_wrap = reinterpret_cast<SamplerSetWrapFn>(totk::graphics::nvn_get_proc_address("nvnSamplerBuilderSetWrapMode"));
+    auto pfn_set_reduc = reinterpret_cast<SamplerSetReductionFn>(totk::graphics::nvn_get_proc_address("nvnSamplerBuilderSetReductionFilter"));
+    auto pfn_samp_init = reinterpret_cast<SamplerInitFn>(totk::graphics::nvn_get_proc_address("nvnSamplerInitialize"));
+    auto pfn_get_filter = reinterpret_cast<SamplerGetFilterFn>(totk::graphics::nvn_get_proc_address("nvnSamplerGetMinMagFilter"));
+    auto pfn_get_wrap = reinterpret_cast<SamplerGetWrapFn>(totk::graphics::nvn_get_proc_address("nvnSamplerGetWrapMode"));
+    auto pfn_get_reduc = reinterpret_cast<SamplerGetReductionFn>(totk::graphics::nvn_get_proc_address("nvnSamplerGetReductionFilter"));
+
+    assert(pfn_set_defaults && pfn_set_filter && pfn_set_wrap && pfn_set_reduc && pfn_samp_init);
+    assert(pfn_get_filter && pfn_get_wrap && pfn_get_reduc);
+
+    pfn_set_defaults(reinterpret_cast<uint64_t>(&builder), 0, 0, 0, 0, 0, 0, 0);
+    pfn_set_filter(reinterpret_cast<uint64_t>(&builder), 2 /* LINEAR */, 1 /* NEAREST */, 0, 0, 0, 0, 0);
+    pfn_set_wrap(reinterpret_cast<uint64_t>(&builder), 3 /* REPEAT */, 3 /* REPEAT */, 1 /* CLAMP */, 0, 0, 0, 0);
+    pfn_set_reduc(reinterpret_cast<uint64_t>(&builder), 2 /* MIN */, 0, 0, 0, 0, 0, 0);
+
+    totk::graphics::NvnSamplerInternal sampler{};
+    uint64_t ok = pfn_samp_init(reinterpret_cast<uint64_t>(&sampler), reinterpret_cast<uint64_t>(&builder), 0, 0, 0, 0, 0, 0);
+    assert(ok == 1);
+    assert(sampler.sampler_id > 0);
+
+    uint32_t min_f = 0, mag_f = 0;
+    pfn_get_filter(reinterpret_cast<uint64_t>(&sampler), reinterpret_cast<uint64_t>(&min_f), reinterpret_cast<uint64_t>(&mag_f), 0, 0, 0, 0, 0);
+    assert(min_f == 2);
+    assert(mag_f == 1);
+
+    uint32_t s_wrap = 0, t_wrap = 0, r_wrap = 0;
+    pfn_get_wrap(reinterpret_cast<uint64_t>(&sampler), reinterpret_cast<uint64_t>(&s_wrap), reinterpret_cast<uint64_t>(&t_wrap), reinterpret_cast<uint64_t>(&r_wrap), 0, 0, 0, 0);
+    assert(s_wrap == 3 && t_wrap == 3 && r_wrap == 1);
+
+    uint64_t red_f = pfn_get_reduc(reinterpret_cast<uint64_t>(&sampler), 0, 0, 0, 0, 0, 0, 0);
+    assert(red_f == 2);
+
+    // Verify registered in bindless manager
+    assert(totk::graphics::NvnBindlessManager::instance().get_sampler(sampler.sampler_id) != nullptr);
+
+    std::printf("  -> Sampler Builder State & GPU Queries (ReportCounter/Value): PASSED\n");
+}
+
 int main() {
     std::printf("==================================================\n");
     std::printf("  NVN-to-Vulkan 1.3 Subsystems Unit Tests\n");
@@ -823,6 +896,7 @@ int main() {
     test_nvn_bindless_descriptor_pool();
     test_nvn_render_state_tracker();
     test_compute_views_and_bc_decoders();
+    test_sampler_builder_and_gpu_queries();
 
     std::printf("\nAll NVN-to-Vulkan unit tests PASSED successfully!\n");
     return 0;
