@@ -79,6 +79,7 @@ add_library(totk_recomp_runtime STATIC
     src/runtime/module_loader.cpp
     src/runtime/game_framework_hle.cpp
     src/runtime/hid_hle.cpp
+    src/runtime/byml_bfres_parser.cpp
     ${PLATFORM_SOURCES}
 )
 target_include_directories(totk_recomp_runtime PUBLIC
@@ -208,3 +209,4 @@ add_totk_test(test_fs_ipc tests/test_fs_ipc.cpp)
 add_totk_test(test_astc_decoder tests/test_astc_decoder.cpp)
 add_totk_test(test_ui_config tests/test_ui_config.cpp)
 add_totk_test(test_maxwell_spirv tests/test_maxwell_spirv.cpp)
+add_totk_test(test_byml_bfres tests/test_byml_bfres.cpp)
