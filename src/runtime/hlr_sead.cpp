@@ -231,6 +231,38 @@ void register_sead_hlr_hooks() {
         c->pc = c->x[30];
     });
 
+    totk::recompiler::register_recompiled_func(0x7104bf5200ULL, [](Arm64Context *c) {
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   c->x[0], 0x100)) {
+            static float s_default_val[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+            c->x[0] = reinterpret_cast<uint64_t>(&s_default_val);
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint8_t flag = 0;
+        std::memcpy(&flag, reinterpret_cast<const void *>(c->x[0] + 0xf4), 1);
+        (void)flag;
+        c->x[0] = c->x[0] + 0xd0;
+        c->pc = c->x[30];
+    });
+
+    totk::recompiler::register_recompiled_func(0x7104bf5278ULL, [](Arm64Context *c) {
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   c->x[0], 0x100)) {
+            static float s_default_val[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+            c->x[0] = reinterpret_cast<uint64_t>(&s_default_val);
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint8_t flag = 0;
+        std::memcpy(&flag, reinterpret_cast<const void *>(c->x[0] + 0xf5), 1);
+        (void)flag;
+        c->x[0] = c->x[0] + 0xd4;
+        c->pc = c->x[30];
+    });
+
     totk::recompiler::register_recompiled_func(0x7104bf6268ULL, [](Arm64Context *c) {
         if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
                                    c->x[0], 0x120)) {
