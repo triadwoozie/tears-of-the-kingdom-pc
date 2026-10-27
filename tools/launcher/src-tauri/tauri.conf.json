@@ -15,11 +15,12 @@
       {
         "title": "UltraTears - Tears of the Kingdom Recomp",
         "label": "main",
-        "width": 1080,
-        "height": 740,
+        "width": 1280,
+        "height": 800,
         "minWidth": 900,
         "minHeight": 640,
-        "resizable": true
+        "resizable": true,
+        "fullscreen": false
       }
     ],
     "security": {

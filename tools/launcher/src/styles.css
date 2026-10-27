@@ -30,6 +30,15 @@
   background: #B87914;
 }
 
+/* Hide scrollbar for header and tabs */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 /* Purah Pad concentric scope grid */
 .purah-scope-grid {
   background-image: 

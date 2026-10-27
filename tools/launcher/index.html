@@ -10,10 +10,10 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
-  <body class="bg-base-100 text-base-content min-h-screen flex flex-col font-sans select-none overflow-x-hidden">
+  <body class="bg-base-100 text-base-content h-screen w-screen overflow-x-hidden flex flex-col font-sans select-none">
 
     <!-- Top Navigation Bar -->
-    <header class="navbar bg-base-200 border-b border-base-300 px-5 h-16 sticky top-0 z-50 shadow-lg flex items-center justify-between gap-4 whitespace-nowrap overflow-x-auto">
+    <header class="navbar bg-base-200 border-b border-base-300 px-5 h-16 sticky top-0 z-50 shadow-lg flex items-center justify-between gap-4 whitespace-nowrap overflow-hidden max-w-full no-scrollbar">
       <!-- Left Brand Block -->
       <div class="flex items-center gap-3 shrink-0">
         <div class="flex flex-col">
@@ -28,13 +28,13 @@
       </div>
 
       <!-- Center Tabs (tabs-bordered) -->
-      <div class="navbar-center hidden md:flex shrink-0">
-        <div class="tabs tabs-bordered" id="nav-tabs">
-          <a class="tab tab-active transition-all tracking-wider uppercase text-xs font-sans font-semibold px-3 py-2" data-tab="tab-launch">Dashboard</a>
-          <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold px-3 py-2 text-base-content/70 hover:text-base-content" data-tab="tab-controllers">Input & Controls</a>
-          <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold px-3 py-2 text-base-content/70 hover:text-base-content" data-tab="tab-assets">Assets & Shaders</a>
-          <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold px-3 py-2 text-base-content/70 hover:text-base-content" data-tab="tab-graphics">Patches & GFX</a>
-          <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold px-3 py-2 text-base-content/70 hover:text-base-content" data-tab="tab-console">Console</a>
+      <div class="navbar-center hidden md:flex shrink-0 overflow-hidden">
+        <div class="tabs tabs-bordered overflow-hidden gap-2 no-scrollbar" id="nav-tabs">
+          <a class="tab tab-active transition-all tracking-wider uppercase text-xs font-sans font-semibold px-3 py-1.5" data-tab="tab-launch">Dashboard</a>
+          <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold px-3 py-1.5 text-base-content/70 hover:text-base-content" data-tab="tab-controllers">Input & Controls</a>
+          <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold px-3 py-1.5 text-base-content/70 hover:text-base-content" data-tab="tab-assets">Assets & Shaders</a>
+          <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold px-3 py-1.5 text-base-content/70 hover:text-base-content" data-tab="tab-graphics">Patches & GFX</a>
+          <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold px-3 py-1.5 text-base-content/70 hover:text-base-content" data-tab="tab-console">Console</a>
         </div>
       </div>
 
@@ -62,7 +62,7 @@
     </header>
 
     <!-- Main Content Area -->
-    <main class="flex-1 p-6 max-w-7xl mx-auto w-full">
+    <main class="flex-1 p-6 max-w-7xl mx-auto w-full overflow-y-auto overflow-x-hidden">
 
       <!-- TAB 1: MAIN DECK (DASHBOARD) -->
       <section id="tab-launch" class="tab-content-panel space-y-6">
