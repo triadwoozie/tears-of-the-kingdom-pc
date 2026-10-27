@@ -7,7 +7,7 @@
     <title>The Legend of Zelda: Tears of the Kingdom — Native Launcher</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body class="bg-base-100 text-base-content min-h-screen flex flex-col font-sans select-none overflow-x-hidden">
@@ -24,7 +24,7 @@
           </svg>
         </div>
         <div class="flex flex-col">
-          <span class="font-serif font-bold text-xs md:text-sm tracking-widest uppercase text-[#DCD09F]">
+          <span class="font-sans font-bold text-xs md:text-sm tracking-widest uppercase text-[#DCD09F]">
             The Legend of Zelda: Tears of the Kingdom
           </span>
           <div class="flex items-center gap-2">
@@ -37,11 +37,11 @@
       <!-- Center Tabs (tabs-bordered) -->
       <div class="navbar-center hidden md:flex">
         <div class="tabs tabs-bordered" id="nav-tabs">
-          <a class="tab tab-active transition-all tracking-wider uppercase text-xs font-serif font-semibold" data-tab="tab-launch">Dashboard</a>
-          <a class="tab transition-all tracking-wider uppercase text-xs font-serif font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-controllers">Controllers</a>
-          <a class="tab transition-all tracking-wider uppercase text-xs font-serif font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-assets">Assets</a>
-          <a class="tab transition-all tracking-wider uppercase text-xs font-serif font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-graphics">Patches & GFX</a>
-          <a class="tab transition-all tracking-wider uppercase text-xs font-serif font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-console">Console</a>
+          <a class="tab tab-active transition-all tracking-wider uppercase text-xs font-sans font-semibold" data-tab="tab-launch">Dashboard</a>
+          <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-controllers">Controllers</a>
+          <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-assets">Assets</a>
+          <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-graphics">Patches & GFX</a>
+          <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-console">Console</a>
         </div>
       </div>
 
@@ -91,10 +91,10 @@
               </div>
 
               <div>
-                <h1 class="font-serif text-2xl lg:text-3xl font-bold tracking-wider text-[#EDE6D1] uppercase">
+                <h1 class="font-sans text-2xl lg:text-3xl font-bold tracking-[0.12em] text-[#EDE6D1] uppercase">
                   The Legend of Zelda
                 </h1>
-                <h2 class="font-serif text-lg lg:text-xl font-semibold tracking-widest text-[#D08D1C] uppercase -mt-1">
+                <h2 class="font-sans text-base lg:text-lg font-bold tracking-[0.12em] text-[#D08D1C] uppercase -mt-1">
                   Tears of the Kingdom
                 </h2>
               </div>
@@ -108,11 +108,11 @@
 
             <!-- Primary Launch CTA -->
             <div class="pt-6 relative z-10">
-              <button id="btn-launch" class="btn btn-primary btn-lg w-full bg-[#D08D1C] hover:bg-[#E8BF40] text-[#111714] font-serif font-bold tracking-widest uppercase border border-[#E8BF40] shadow-[0_0_20px_rgba(208,141,28,0.25)] transition-all duration-200 hover:scale-[1.01] flex items-center justify-center gap-3">
+              <button id="btn-launch" class="btn btn-primary btn-lg w-full bg-[#D08D1C] hover:bg-[#E8BF40] text-[#111714] font-sans font-bold tracking-[0.12em] uppercase border border-[#E8BF40] shadow-[0_0_20px_rgba(208,141,28,0.25)] transition-all duration-200 hover:scale-[1.01] flex items-center justify-center gap-3">
                 <svg class="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                 <span>Launch Tears of the Kingdom</span>
               </button>
-              <button id="btn-stop" class="btn btn-error btn-lg w-full font-serif font-bold tracking-widest uppercase hidden flex items-center justify-center gap-3 shadow-lg">
+              <button id="btn-stop" class="btn btn-error btn-lg w-full font-sans font-bold tracking-widest uppercase hidden flex items-center justify-center gap-3 shadow-lg">
                 <svg class="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
                 <span>Stop Engine Process</span>
               </button>
@@ -123,7 +123,7 @@
           <div class="card bg-base-200 border border-base-300 col-span-12 lg:col-span-5 p-6 flex flex-col justify-between shadow-xl space-y-4">
             <div class="space-y-4">
               <div class="flex items-center justify-between border-b border-base-300 pb-2">
-                <span class="font-serif text-sm font-bold uppercase tracking-wider text-[#DCD09F] flex items-center gap-2">
+                <span class="font-sans text-sm font-bold uppercase tracking-wider text-[#DCD09F] flex items-center gap-2">
                   <svg class="w-4 h-4 text-[#D08D1C] fill-current" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
                   Quick Configuration
                 </span>
@@ -185,12 +185,12 @@
         <div class="card bg-base-200 border border-base-300 shadow-md p-5">
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div class="flex-1 space-y-1">
-              <label class="text-xs font-serif font-bold uppercase tracking-wider text-[#DCD09F]">Connected Gamepad Device</label>
+              <label class="text-xs font-sans font-bold uppercase tracking-wider text-[#DCD09F]">Connected Gamepad Device</label>
               <div class="join w-full">
                 <select id="ctrl-device-select" class="select select-bordered join-item w-full font-mono text-xs bg-base-100">
                   <option value="">Scanning for connected gamepads...</option>
                 </select>
-                <button id="btn-refresh-controllers" class="btn btn-secondary join-item font-serif text-xs uppercase tracking-wider gap-1.5">
+                <button id="btn-refresh-controllers" class="btn btn-secondary join-item font-sans text-xs uppercase tracking-wider gap-1.5">
                   <svg class="w-4 h-4 fill-none stroke-current" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                   Scan
                 </button>
@@ -198,7 +198,7 @@
             </div>
 
             <div class="w-full md:w-64 space-y-1">
-              <label class="text-xs font-serif font-bold uppercase tracking-wider text-[#DCD09F]">Button Layout Preset</label>
+              <label class="text-xs font-sans font-bold uppercase tracking-wider text-[#DCD09F]">Button Layout Preset</label>
               <select id="ctrl-profile-select" class="select select-bordered w-full font-mono text-xs bg-base-100">
                 <option value="Nintendo (B/A, Y/X)" selected>Nintendo (B/A, Y/X)</option>
                 <option value="Xbox / PC Standard">Xbox / PC Standard (A/B, X/Y Swap)</option>
@@ -213,7 +213,7 @@
           <!-- Left Stick Visualizer & Scope -->
           <div class="card bg-base-200 border border-base-300 shadow-md p-5 space-y-5">
             <div class="flex items-center justify-between border-b border-base-300 pb-2">
-              <h3 class="font-serif font-bold text-sm tracking-wider uppercase text-[#DCD09F] flex items-center gap-2">
+              <h3 class="font-sans font-bold text-sm tracking-wider uppercase text-[#DCD09F] flex items-center gap-2">
                 <svg class="w-4 h-4 text-[#63A7BC] fill-current" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>
                 Purah Pad Aiming & Deadzone Scope
               </h3>
@@ -285,7 +285,7 @@
           <div class="space-y-6">
             <!-- Rumble Card -->
             <div class="card bg-base-200 border border-base-300 shadow-md p-5 space-y-4">
-              <h3 class="font-serif font-bold text-sm tracking-wider uppercase text-[#DCD09F] flex items-center gap-2 border-b border-base-300 pb-2">
+              <h3 class="font-sans font-bold text-sm tracking-wider uppercase text-[#DCD09F] flex items-center gap-2 border-b border-base-300 pb-2">
                 <svg class="w-4 h-4 text-[#D08D1C] fill-current" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
                 Haptic Feedback & Rumble Studio
               </h3>
@@ -314,7 +314,7 @@
                 <input type="checkbox" id="ctrl-hd-rumble-toggle" class="checkbox checkbox-accent checkbox-sm" checked />
               </div>
 
-              <button id="btn-test-rumble" class="btn btn-outline border-[#D08D1C] text-[#E8BF40] hover:bg-[#D08D1C] hover:text-[#111714] btn-sm w-full font-serif tracking-wider uppercase gap-2 transition-all">
+              <button id="btn-test-rumble" class="btn btn-outline border-[#D08D1C] text-[#E8BF40] hover:bg-[#D08D1C] hover:text-[#111714] btn-sm w-full font-sans tracking-wider uppercase gap-2 transition-all">
                 <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M13 3h-2v10h2V3zm4.83 2.17l-1.42 1.42C17.99 7.86 19 9.81 19 12c0 3.87-3.13 7-7 7s-7-3.13-7-7c0-2.19 1.01-4.14 2.58-5.42L6.17 5.17C4.23 6.82 3 9.26 3 12c0 4.97 4.03 9 9 9s9-4.03 9-9c0-2.74-1.23-5.18-3.17-6.83z"/></svg>
                 Test Haptic Pulse (250ms)
               </button>
@@ -322,7 +322,7 @@
 
             <!-- Motion & Gyro -->
             <div class="card bg-base-200 border border-base-300 shadow-md p-5 space-y-3">
-              <h3 class="font-serif font-bold text-sm tracking-wider uppercase text-[#DCD09F] flex items-center gap-2 border-b border-base-300 pb-2">
+              <h3 class="font-sans font-bold text-sm tracking-wider uppercase text-[#DCD09F] flex items-center gap-2 border-b border-base-300 pb-2">
                 <svg class="w-4 h-4 text-[#63A7BC] fill-current" viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0013 3.06V1h-2v2.06A8.994 8.994 0 003.06 11H1v2h2.06A8.994 8.994 0 0011 20.94V23h2v-2.06A8.994 8.994 0 0020.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
                 Motion & Gyroscope Aiming
               </h3>
@@ -352,7 +352,7 @@
       <section id="tab-assets" class="tab-content-panel space-y-6 hidden">
         <div class="card bg-base-200 border border-base-300 shadow-md p-6 space-y-6">
           <div class="border-b border-base-300 pb-3">
-            <h3 class="font-serif font-bold text-lg text-[#DCD09F] uppercase tracking-wider">RomFS Asset Vault & Integrity</h3>
+            <h3 class="font-sans font-bold text-lg text-[#DCD09F] uppercase tracking-wider">RomFS Asset Vault & Integrity</h3>
             <p class="text-xs text-base-content/70">
               Select your legally dumped Tears of the Kingdom 1.4.3 RomFS directory or pre-indexed <code class="text-xs bg-base-100 px-1 py-0.5 rounded font-mono text-[#E8BF40]">romfs.bin</code> file.
             </p>
@@ -360,10 +360,10 @@
 
           <!-- Path Input & Picker -->
           <div class="form-control space-y-2">
-            <label class="label py-0 text-xs font-serif font-bold uppercase tracking-wider text-[#DCD09F]">RomFS Location</label>
+            <label class="label py-0 text-xs font-sans font-bold uppercase tracking-wider text-[#DCD09F]">RomFS Location</label>
             <div class="join w-full">
               <input type="text" id="assets-romfs-input" placeholder="/path/to/extracted/romfs or /path/to/romfs.bin" class="input input-bordered join-item w-full font-mono text-xs bg-base-100 focus:border-[#D08D1C]" />
-              <button id="btn-browse-romfs" class="btn btn-secondary join-item font-serif text-xs uppercase tracking-wider gap-2">
+              <button id="btn-browse-romfs" class="btn btn-secondary join-item font-sans text-xs uppercase tracking-wider gap-2">
                 <svg class="w-4 h-4 fill-none stroke-current" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z"/></svg>
                 Browse Path
               </button>
@@ -401,12 +401,12 @@
           <div class="card bg-base-100 border border-base-300 p-5 space-y-4 rounded-sm">
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <h4 class="font-serif font-bold text-sm text-[#D08D1C] uppercase tracking-wider">Build Indexed romfs.bin</h4>
+                <h4 class="font-sans font-bold text-sm text-[#D08D1C] uppercase tracking-wider">Build Indexed romfs.bin</h4>
                 <p class="text-xs text-base-content/70">
                   Compresses and indexes loose assets into a single linear binary for faster initial seek and zero runtime file descriptor exhaustion.
                 </p>
               </div>
-              <button id="btn-pack-romfs" class="btn btn-primary btn-sm font-serif uppercase tracking-wider gap-2">
+              <button id="btn-pack-romfs" class="btn btn-primary btn-sm font-sans uppercase tracking-wider gap-2">
                 <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
                 Pack romfs.bin Now
               </button>
@@ -429,7 +429,7 @@
 
           <!-- Left Column: Display & Vulkan GFX -->
           <div class="card bg-base-200 border border-base-300 shadow-md p-5 space-y-4 lg:col-span-1">
-            <h3 class="font-serif font-bold text-sm text-[#DCD09F] uppercase tracking-wider flex items-center gap-2 border-b border-base-300 pb-2">
+            <h3 class="font-sans font-bold text-sm text-[#DCD09F] uppercase tracking-wider flex items-center gap-2 border-b border-base-300 pb-2">
               <svg class="w-4 h-4 text-[#D08D1C] fill-current" viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>
               Display & Vulkan GFX
             </h3>
@@ -469,16 +469,16 @@
           <div class="card bg-base-200 border border-base-300 shadow-md p-5 space-y-4 lg:col-span-2">
             <div class="flex items-center justify-between border-b border-base-300 pb-2">
               <div>
-                <h3 class="font-serif font-bold text-sm text-[#DCD09F] uppercase tracking-wider">Engine Shims & Runtime Patches</h3>
+                <h3 class="font-sans font-bold text-sm text-[#DCD09F] uppercase tracking-wider">Engine Shims & Runtime Patches</h3>
                 <p class="text-[11px] text-base-content/60">Toggle low-level allocator shims and performance hooks injected into guest routines</p>
               </div>
-              <button id="btn-save-patches" class="btn btn-xs btn-outline border-[#D08D1C] text-[#E8BF40] hover:bg-[#D08D1C] hover:text-[#111714] font-serif uppercase tracking-wider">Save Config</button>
+              <button id="btn-save-patches" class="btn btn-xs btn-outline border-[#D08D1C] text-[#E8BF40] hover:bg-[#D08D1C] hover:text-[#111714] font-sans uppercase tracking-wider">Save Config</button>
             </div>
 
             <div class="overflow-x-auto rounded-sm border border-base-300">
               <table class="table table-sm bg-base-100 w-full text-xs">
                 <thead>
-                  <tr class="bg-base-200 text-[#DCD09F] font-serif border-b border-base-300">
+                  <tr class="bg-base-200 text-[#DCD09F] font-sans border-b border-base-300">
                     <th class="w-12 text-center">Hook</th>
                     <th>Subsystem / Target Symbol</th>
                     <th>Technical Description</th>
@@ -500,7 +500,7 @@
         <div class="flex flex-wrap items-center justify-between gap-3 p-3 bg-base-200 rounded-sm border border-base-300">
           <div class="flex items-center gap-3">
             <div class="flex items-center gap-1.5">
-              <span class="text-xs font-serif font-semibold text-[#DCD09F]">Channel:</span>
+              <span class="text-xs font-sans font-semibold text-[#DCD09F]">Channel:</span>
               <select id="log-filter-channel" class="select select-bordered select-xs font-mono bg-base-100 text-xs">
                 <option value="all" selected>All Subsystems</option>
                 <option value="gfx">[totk-gfx]</option>
@@ -511,7 +511,7 @@
             </div>
 
             <div class="flex items-center gap-1.5">
-              <span class="text-xs font-serif font-semibold text-[#DCD09F]">Search:</span>
+              <span class="text-xs font-sans font-semibold text-[#DCD09F]">Search:</span>
               <input type="text" id="log-search-input" placeholder="Filter pattern..." class="input input-bordered input-xs font-mono w-48 bg-base-100 text-xs" />
             </div>
           </div>
@@ -532,7 +532,7 @@
         <!-- Terminal Window (Mockup Code) -->
         <div class="mockup-code bg-[#0D1210] border border-[#222F29] text-xs font-mono h-[440px] overflow-y-auto shadow-2xl rounded-sm" id="console-terminal">
           <div class="px-5 py-2 text-[#DCD09F] font-bold border-b border-[#222F29] flex justify-between items-center bg-[#111714]">
-            <span class="font-serif tracking-wider text-xs uppercase flex items-center gap-2">
+            <span class="font-sans tracking-wider text-xs uppercase flex items-center gap-2">
               <span class="w-2 h-2 rounded-full bg-[#D08D1C]"></span>
               UltraTears System Telemetry Console
             </span>

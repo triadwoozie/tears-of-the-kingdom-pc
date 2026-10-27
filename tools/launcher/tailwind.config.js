@@ -19,8 +19,7 @@ export default {
         },
       },
       fontFamily: {
-        serif: ["Cinzel", "Cormorant Garamond", "Georgia", "serif"],
-        sans: ["Inter", "Plus Jakarta Sans", "system-ui", "sans-serif"],
+        sans: ["Plus Jakarta Sans", "Inter", "system-ui", "sans-serif"],
         mono: ["'JetBrains Mono'", "Fira Code", "monospace"],
       },
     },
