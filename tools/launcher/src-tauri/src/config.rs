@@ -4,6 +4,14 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+fn default_framerate_mode() -> String {
+    "60".to_string()
+}
+
+fn default_custom_hz() -> u32 {
+    144
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DisplayConfig {
     pub resolution: String,
@@ -11,6 +19,10 @@ pub struct DisplayConfig {
     pub vsync_mode: String,
     pub docked_mode: bool,
     pub fullscreen: bool,
+    #[serde(default = "default_framerate_mode")]
+    pub framerate_mode: String,
+    #[serde(default = "default_custom_hz")]
+    pub target_hz: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,6 +172,8 @@ pub fn get_default_config() -> LauncherConfig {
             vsync_mode: "Mailbox".to_string(),
             docked_mode: true,
             fullscreen: false,
+            framerate_mode: "60".to_string(),
+            target_hz: 144,
         },
         graphics: GraphicsConfig {
             enable_hud: true,
@@ -185,39 +199,39 @@ pub fn get_default_config() -> LauncherConfig {
         patches: vec![
             PatchConfig {
                 id: "patch_zero_heap".to_string(),
-                name: "sead::HeapMgr Zero-Heap Arena Fallback (0x758 fix)".to_string(),
+                name: "sead::HeapMgr Zero-Heap Arena Fallback".to_string(),
                 enabled: true,
                 description: "Intercepts direct-call null allocations at startup using a 32 MiB thread-safe fallback arena.".to_string(),
             },
             PatchConfig {
                 id: "patch_jump_table_fallback".to_string(),
-                name: "Lifter Jump-Table 'all' Fallback (PR #24 Save/Load Crash Fix)".to_string(),
+                name: "Lifter Jump-Table Target Fallback".to_string(),
                 enabled: true,
-                description: "Applies 'all' targets fallback for unconfirmed single-target jump tables in save/load routines.".to_string(),
+                description: "Applies dynamic target fallback for unconfirmed branch tables in save/load routines.".to_string(),
             },
             PatchConfig {
                 id: "patch_shaders_pack".to_string(),
-                name: "Packed Shader Archive Loader (PR #25 shaders.pack)".to_string(),
+                name: "Packed Shader Archive Loader".to_string(),
                 enabled: true,
-                description: "Loads pre-indexed binary shaders.pack (single archive) instead of 57k individual disk files.".to_string(),
+                description: "Loads optimized single-file binary shader cache (shaders.pack) instead of loose disk files.".to_string(),
             },
             PatchConfig {
                 id: "patch_mouse_camera".to_string(),
-                name: "Native Mouse Camera Panning (PR #20)".to_string(),
+                name: "Native Mouse Camera Panning".to_string(),
                 enabled: true,
                 description: "Enables raw sub-pixel mouse look and camera state hooks with F8 cursor toggle.".to_string(),
             },
             PatchConfig {
                 id: "patch_loose_romfs".to_string(),
-                name: "Loose RomFS Directory Override".to_string(),
+                name: "Loose RomFS Asset Override".to_string(),
                 enabled: true,
                 description: "Allows loading individual game assets directly from unpacked RomFS folder.".to_string(),
             },
             PatchConfig {
                 id: "patch_60fps_lock".to_string(),
-                name: "Dynamic FPS / 60 FPS Lock".to_string(),
-                enabled: false,
-                description: "Uncaps standard 30 FPS console lock and synchronizes game speed to 60 FPS.".to_string(),
+                name: "60 FPS Dynamic Timestep".to_string(),
+                enabled: true,
+                description: "Uncaps standard 30 FPS console lock and synchronizes game physics and simulation to 60 FPS.".to_string(),
             },
             PatchConfig {
                 id: "patch_disable_drs".to_string(),

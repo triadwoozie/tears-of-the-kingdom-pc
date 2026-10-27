@@ -222,6 +222,33 @@ pub async fn launch_engine(
         cmd.env("TOTK_SHADER_PACK", &config.shader_pack.shaders_pack_path);
     }
 
+    // Simulation / Framerate Delta-Time Timestep
+    match config.display.framerate_mode.as_str() {
+        "30" => {
+            cmd.env("TOTK_FPS60", "0");
+            cmd.env("TOTK_UNCAPPED", "0");
+        }
+        "60" => {
+            cmd.env("TOTK_FPS60", "1");
+            cmd.env("TOTK_UNCAPPED", "0");
+        }
+        "120" => {
+            cmd.env("TOTK_FPS60", "1");
+            cmd.env("TOTK_UNCAPPED", "1");
+            cmd.env("TOTK_UNCAPPED_HZ", "120");
+        }
+        "custom" => {
+            cmd.env("TOTK_FPS60", "1");
+            cmd.env("TOTK_UNCAPPED", "1");
+            let hz = config.display.target_hz.clamp(30, 165);
+            cmd.env("TOTK_UNCAPPED_HZ", hz.to_string());
+        }
+        _ => {
+            cmd.env("TOTK_FPS60", "1");
+            cmd.env("TOTK_UNCAPPED", "0");
+        }
+    }
+
     // Patches
     for patch in &config.patches {
         if patch.enabled {
@@ -231,7 +258,7 @@ pub async fn launch_engine(
                 "patch_shaders_pack" => { cmd.env("TOTK_PATCH_SHADERS_PACK", "1"); },
                 "patch_mouse_camera" => { cmd.env("TOTK_PATCH_MOUSE_CAMERA", "1"); },
                 "patch_loose_romfs" => { cmd.env("TOTK_PATCH_LOOSE_ROMFS", "1"); },
-                "patch_60fps_lock" => { cmd.env("TOTK_PATCH_60FPS", "1"); },
+                "patch_60fps_lock" => { cmd.env("TOTK_PATCH_60FPS", "1"); cmd.env("TOTK_FPS60", "1"); },
                 "patch_disable_drs" => { cmd.env("TOTK_PATCH_DISABLE_DRS", "1"); },
                 "patch_ultrawide" => { cmd.env("TOTK_PATCH_ULTRAWIDE", "1"); },
                 _ => {},

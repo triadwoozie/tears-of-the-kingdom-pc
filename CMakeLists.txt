@@ -81,6 +81,7 @@ add_library(totk_recomp_runtime STATIC
     src/runtime/game_framework_hle.cpp
     src/runtime/hid_hle.cpp
     src/runtime/byml_bfres_parser.cpp
+    src/runtime/game_patches_v143.c
     ${PLATFORM_SOURCES}
 )
 target_include_directories(totk_recomp_runtime PUBLIC

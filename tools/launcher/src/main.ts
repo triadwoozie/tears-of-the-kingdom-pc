@@ -8,6 +8,8 @@ export interface DisplayConfig {
   vsync_mode: string;
   docked_mode: bool;
   fullscreen: bool;
+  framerate_mode: string;
+  target_hz: number;
 }
 
 export interface GraphicsConfig {
@@ -168,8 +170,12 @@ const dashHudToggle = document.getElementById("dash-hud-toggle") as HTMLInputEle
 const dashHeadlessToggle = document.getElementById("dash-headless-toggle") as HTMLInputElement;
 const dashResolutionSelect = document.getElementById("dash-resolution-select") as HTMLSelectElement;
 const dashVsyncSelect = document.getElementById("dash-vsync-select") as HTMLSelectElement;
+const dashFramerateSelect = document.getElementById("dash-framerate-select") as HTMLSelectElement;
+const dashCustomHzContainer = document.getElementById("dash-custom-hz-container") as HTMLElement;
+const sliderCustomHz = document.getElementById("slider-custom-hz") as HTMLInputElement;
+const labelCustomHz = document.getElementById("label-custom-hz") as HTMLElement;
 
-// PR #20 Mouse & Keyboard Elements
+// Dedicated Mouse & Keyboard Elements
 const mouseCamMasterToggle = document.getElementById("mouse-cam-master-toggle") as HTMLInputElement;
 const sliderMouseSensX = document.getElementById("slider-mouse-sens-x") as HTMLInputElement;
 const sliderMouseSensY = document.getElementById("slider-mouse-sens-y") as HTMLInputElement;
@@ -272,10 +278,10 @@ function initTabs() {
     tab.addEventListener("click", () => {
       tabs.forEach((t) => {
         t.classList.remove("tab-active");
-        t.classList.add("text-[#DCD09F]/60");
+        t.classList.add("text-base-content/70");
       });
       tab.classList.add("tab-active");
-      tab.classList.remove("text-[#DCD09F]/60");
+      tab.classList.remove("text-base-content/70");
 
       const targetId = tab.getAttribute("data-tab");
       document.querySelectorAll(".tab-content-panel").forEach((panel) => {
@@ -310,6 +316,14 @@ async function loadConfig() {
     currentConfig = await invoke<LauncherConfig>("get_config");
     applyTheme(currentConfig.theme === "sky-island-light" ? "sky-island-light" : "sky-island-dark");
 
+    // Ensure display framerate defaults
+    if (!currentConfig.display.framerate_mode) {
+      currentConfig.display.framerate_mode = "60";
+    }
+    if (!currentConfig.display.target_hz) {
+      currentConfig.display.target_hz = 144;
+    }
+
     // Ensure mouse and shader_pack defaults
     if (!currentConfig.mouse) {
       currentConfig.mouse = {
@@ -337,7 +351,21 @@ async function loadConfig() {
     dashResolutionSelect.value = currentConfig.display.resolution;
     dashVsyncSelect.value = currentConfig.display.vsync_mode;
 
-    // Hydrate Mouse & Keyboard (PR #20)
+    // Hydrate Framerate Controls
+    if (dashFramerateSelect) {
+      dashFramerateSelect.value = currentConfig.display.framerate_mode;
+      if (currentConfig.display.framerate_mode === "custom") {
+        dashCustomHzContainer?.classList.remove("hidden");
+      } else {
+        dashCustomHzContainer?.classList.add("hidden");
+      }
+    }
+    if (sliderCustomHz) {
+      sliderCustomHz.value = String(currentConfig.display.target_hz);
+      if (labelCustomHz) labelCustomHz.innerText = `${currentConfig.display.target_hz} Hz`;
+    }
+
+    // Hydrate Mouse & Keyboard
     mouseCamMasterToggle.checked = currentConfig.mouse.mouse_cam_enabled;
     const sensXVal = Math.round(currentConfig.mouse.mouse_sens_x * 10);
     const sensYVal = Math.round(currentConfig.mouse.mouse_sens_y * 10);
@@ -420,11 +448,11 @@ function renderKeybindsTable() {
 
     tr.innerHTML = `
       <td>
-        <span class="font-medium text-[#EDE6D1]">${escapeHtml(def.name)}</span>
-        <div class="text-[10px] text-base-content/50">${escapeHtml(def.group)}</div>
+        <span class="font-medium text-base-content">${escapeHtml(def.name)}</span>
+        <div class="text-[10px] text-base-content/60">${escapeHtml(def.group)}</div>
       </td>
       <td>
-        <span class="badge badge-sm badge-ghost font-mono text-[10px] text-[#E8BF40] border border-base-300">${escapeHtml(def.switchBtn)}</span>
+        <span class="badge badge-sm badge-ghost font-mono text-[10px] text-primary border border-base-300">${escapeHtml(def.switchBtn)}</span>
       </td>
       <td>
         <button class="btn btn-xs ${isCustom ? "btn-warning" : "btn-outline border-base-300"} font-mono text-[11px] gap-1 rebind-btn" data-key-id="${def.id}">
@@ -453,7 +481,7 @@ function renderKeybindsTable() {
 }
 
 btnResetKeybinds?.addEventListener("click", () => {
-  if (confirm("Reset all physical keyboard bindings to PR #20 defaults?")) {
+  if (confirm("Reset all physical keyboard bindings to default layout?")) {
     if (currentConfig?.mouse) {
       currentConfig.mouse.keybinds = {};
       saveCurrentConfig();
@@ -469,13 +497,13 @@ function renderPatchesTable() {
 
   const patchHooks: Record<string, string> = {
     patch_zero_heap: "f_80006a920 + 0x8008ac138",
-    patch_jump_table_fallback: "tools/lifter/gen.py (PR #24)",
-    patch_shaders_pack: "src/gfx/vkb_shader.c (PR #25)",
-    patch_mouse_camera: "src/host/mouse_camera.c (PR #20)",
-    patch_loose_romfs: "src/fs/romfs.c",
-    patch_60fps_lock: "sead::Framework::calc",
-    patch_disable_drs: "agl::pdr::DRC",
-    patch_ultrawide: "sead::Camera",
+    patch_jump_table_fallback: "Lifter Branch Resolver",
+    patch_shaders_pack: "Vulkan Shader Cache",
+    patch_mouse_camera: "Direct Input / Mouse Look",
+    patch_loose_romfs: "RomFS Asset Loader",
+    patch_60fps_lock: "Monotonic Timestep Delta",
+    patch_disable_drs: "Render Target Fixed Scale",
+    patch_ultrawide: "Viewport Aspect Matrix",
   };
 
   currentConfig.patches.forEach((patch, idx) => {
@@ -498,6 +526,18 @@ function renderPatchesTable() {
       if (patch.id === "patch_shaders_pack") {
         currentConfig.shader_pack.use_shaders_pack = chk.checked;
       }
+      if (patch.id === "patch_60fps_lock") {
+        if (chk.checked) {
+          if (currentConfig.display.framerate_mode === "30") {
+            currentConfig.display.framerate_mode = "60";
+            if (dashFramerateSelect) dashFramerateSelect.value = "60";
+          }
+        } else {
+          currentConfig.display.framerate_mode = "30";
+          if (dashFramerateSelect) dashFramerateSelect.value = "30";
+          dashCustomHzContainer?.classList.add("hidden");
+        }
+      }
       saveCurrentConfig();
     });
     tdCheck.appendChild(chk);
@@ -506,13 +546,13 @@ function renderPatchesTable() {
     const hookSymbol = patchHooks[patch.id] || "src/runtime/";
     tdName.innerHTML = `
       <div class="flex flex-col gap-0.5">
-        <span class="font-semibold text-xs text-[#EDE6D1]">${escapeHtml(patch.name)}</span>
-        <span class="badge badge-ghost font-mono text-[10px] text-[#63A7BC] border border-base-300/80 w-fit">${escapeHtml(hookSymbol)}</span>
+        <span class="font-semibold text-xs text-base-content">${escapeHtml(patch.name)}</span>
+        <span class="badge badge-ghost font-mono text-[10px] text-accent border border-base-300/80 w-fit">${escapeHtml(hookSymbol)}</span>
       </div>
     `;
 
     const tdDesc = document.createElement("td");
-    tdDesc.className = "text-xs text-base-content/75";
+    tdDesc.className = "text-xs text-base-content/80";
     tdDesc.innerText = patch.description;
 
     tr.appendChild(tdCheck);
@@ -531,7 +571,35 @@ btnSavePatches?.addEventListener("click", async () => {
   }, 1500);
 });
 
-// 6. PR #20 Mouse Controls Listeners
+// 6. Framerate Selector Listeners
+dashFramerateSelect?.addEventListener("change", () => {
+  if (!currentConfig) return;
+  const val = dashFramerateSelect.value;
+  currentConfig.display.framerate_mode = val;
+  if (val === "custom") {
+    dashCustomHzContainer?.classList.remove("hidden");
+  } else {
+    dashCustomHzContainer?.classList.add("hidden");
+  }
+
+  // Synchronize 60fps patch flag
+  const patch60 = currentConfig.patches.find((p) => p.id === "patch_60fps_lock");
+  if (patch60) {
+    patch60.enabled = (val === "60" || val === "120" || val === "custom");
+    renderPatchesTable();
+  }
+  saveCurrentConfig();
+});
+
+sliderCustomHz?.addEventListener("input", () => {
+  if (!currentConfig) return;
+  const hz = parseInt(sliderCustomHz.value, 10) || 120;
+  if (labelCustomHz) labelCustomHz.innerText = `${hz} Hz`;
+  currentConfig.display.target_hz = hz;
+  saveCurrentConfig();
+});
+
+// 7. Mouse Controls Listeners
 function syncMouseCam(enabled: boolean) {
   if (!currentConfig) return;
   currentConfig.mouse.mouse_cam_enabled = enabled;
@@ -586,7 +654,7 @@ mouseLockCursor?.addEventListener("change", () => {
   }
 });
 
-// 7. Controller Enumeration & Live Calibration
+// 8. Controller Enumeration & Live Calibration
 async function refreshControllers() {
   try {
     const controllers = await invoke<GamepadInfo[]>("list_controllers");
@@ -753,7 +821,7 @@ btnTestRumble?.addEventListener("click", async () => {
   }
 });
 
-// 8. Assets & RomFS Verification
+// 9. Assets & RomFS Verification
 async function checkRomfs(path: string) {
   try {
     const status = await invoke<RomFsStatus>("validate_romfs", { path });
@@ -818,15 +886,15 @@ function updateRomfsUI(status: RomFsStatus) {
     }
   }
 
-  // Row 4: shaders.pack (PR #25)
+  // Row 4: shaders.pack
   if (iconCheckShaderPack && badgeCheckShaderPack) {
     if (status.has_shader_pack) {
       iconCheckShaderPack.innerText = "✓";
-      badgeCheckShaderPack.className = "badge badge-sm bg-[#12582C] text-[#2E8B57] border border-[#2E8B57] font-mono text-[10px]";
+      badgeCheckShaderPack.className = "badge badge-sm badge-success font-mono text-[10px]";
       badgeCheckShaderPack.innerText = `Packed Ready (${formatBytes(status.shader_pack_bytes)})`;
     } else {
       iconCheckShaderPack.innerText = "⚠️";
-      badgeCheckShaderPack.className = "badge badge-sm bg-[#D08D1C]/20 text-[#E8BF40] border border-[#E8BF40]/40 font-mono text-[10px]";
+      badgeCheckShaderPack.className = "badge badge-sm badge-warning badge-outline font-mono text-[10px]";
       badgeCheckShaderPack.innerText = "Unpacked (~57k files)";
     }
   }
@@ -909,11 +977,11 @@ listen("romfs-pack-progress", (event: any) => {
   }
 });
 
-// PR #25 Shader Packer Action
+// Shader Packer Action
 btnPackShaders?.addEventListener("click", async () => {
   shaderPackProgressContainer.classList.remove("hidden");
   shaderPackProgressBar.value = 5;
-  shaderPackProgressStatus.innerText = "Spawning PR #25 shader packer (tools/pack_shaders.py)...";
+  shaderPackProgressStatus.innerText = "Optimizing shader cache archive...";
   shaderPackProgressPct.innerText = "5%";
 
   try {
@@ -938,7 +1006,7 @@ listen("shader-pack-progress", (event: any) => {
   }
 });
 
-// 9. Quick Controls & Settings
+// 10. Quick Controls & Settings
 dashDockedToggle?.addEventListener("change", () => {
   if (currentConfig) {
     currentConfig.display.docked_mode = dashDockedToggle.checked;
@@ -1004,7 +1072,7 @@ gfxFullscreenToggle?.addEventListener("change", () => {
   }
 });
 
-// 10. Engine Execution & Status
+// 11. Engine Execution & Status
 async function checkEngineStatus() {
   try {
     const st = await invoke<EngineState>("get_engine_status");
@@ -1016,13 +1084,13 @@ async function checkEngineStatus() {
 
 function updateEngineStateUI(st: EngineState) {
   if (st.is_running) {
-    statusBadge.className = "badge badge-success gap-2 font-mono text-xs py-2.5 px-3 animate-pulse border border-[#2E8B57]";
+    statusBadge.className = "badge badge-success gap-2 font-mono text-xs py-2 px-3 animate-pulse border border-success whitespace-nowrap shrink-0";
     statusBadge.innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-white"></span><span>Running PID ${st.pid}</span>`;
     btnLaunch.classList.add("hidden");
     btnStop.classList.remove("hidden");
     quickPidLabel.innerText = `PID: ${st.pid}`;
   } else {
-    statusBadge.className = "badge badge-ghost gap-2 font-mono text-xs py-2.5 px-3 border border-base-300";
+    statusBadge.className = "badge badge-ghost gap-2 font-mono text-xs py-2 px-3 border border-base-300 whitespace-nowrap shrink-0";
     statusBadge.innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-base-content/40"></span><span>Engine Idle</span>`;
     btnLaunch.classList.remove("hidden");
     btnStop.classList.add("hidden");
@@ -1037,7 +1105,7 @@ btnLaunch?.addEventListener("click", async () => {
     updateEngineStateUI({ is_running: true, pid });
     appendLog({
       channel: "info",
-      text: `[Launcher] Spawned ultratears engine with PID ${pid} (Mouse Look: ${currentConfig.mouse?.mouse_cam_enabled ? "Enabled" : "Disabled"})`,
+      text: `[Launcher] Spawned ultratears engine with PID ${pid} (Framerate: ${currentConfig.display.framerate_mode === "custom" ? currentConfig.display.target_hz + "Hz" : currentConfig.display.framerate_mode + " FPS"})`,
       timestamp: Date.now(),
     });
   } catch (err: any) {
@@ -1063,7 +1131,7 @@ listen("engine-status", (event: any) => {
   updateEngineStateUI(event.payload);
 });
 
-// 11. Console & Log Streaming
+// 12. Console & Log Streaming
 listen("engine-log", (event: any) => {
   const entry: EngineLogEntry = event.payload;
   logHistory.push(entry);
@@ -1085,15 +1153,15 @@ function appendLog(entry: EngineLogEntry) {
   if (!matchFilter || !matchSearch) return;
 
   const pre = document.createElement("pre");
-  let colorClass = "text-[#DCD09F]/80";
+  let colorClass = "text-base-content/80";
   if (entry.channel === "gfx" || entry.text.includes("[totk-gfx]") || entry.text.includes("[NVN]") || entry.text.includes("shader")) {
-    colorClass = "text-[#63A7BC] font-semibold";
+    colorClass = "text-accent font-semibold";
   } else if (entry.channel === "thread" || entry.text.includes("[totk-thread]")) {
-    colorClass = "text-[#E8BF40] font-semibold";
+    colorClass = "text-warning font-semibold";
   } else if (entry.channel === "error" || entry.text.includes("signal") || entry.text.includes("SIGSEGV") || entry.text.includes("fault") || entry.text.includes("error") || entry.text.includes("Error")) {
-    colorClass = "text-[#C93B3B] font-bold";
+    colorClass = "text-error font-bold";
   } else if (entry.channel === "info" || entry.text.includes("[totk]")) {
-    colorClass = "text-[#DCD09F]";
+    colorClass = "text-base-content";
   }
 
   pre.className = colorClass;
