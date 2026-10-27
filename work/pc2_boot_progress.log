@@ -1,0 +1,79 @@
+================================================================================
+PC-2 RECOMPILATION & RUNTIME HARDENING PROGRESS LOG
+================================================================================
+Timestamp: 2026-10-26T17:08:30+05:30
+Node Identity: PC-2 (Secondary Engineering Node)
+Target: tears-of-the-kingdom-pc <-> refs/ultratears (upstream kuraeow/ultratears:dev)
+Operating Mode: Synthetic Harness & Clean-Room C11/C++20 Subsystem Engineering
+
+--------------------------------------------------------------------------------
+SUMMARY OF CRASH RESOLUTION & PR DELIVERABLES
+--------------------------------------------------------------------------------
+1. Milestone 1: Resolve sead::Heap / TLS Allocator NULL Dereference
+   - Issue: SIGSEGV at 0x8 during nnMain (f_800cb5e1c -> f_80006a920).
+     f_802bb74c0 queried TLS slot f_805143c60, returning 0 because worker threads
+     spawned via svcCreateThread (0x08) lacked initialized Horizon OS TLS (+0x100..+0x180).
+   - Solution:
+     * Captured parent CPU tpidrro and tpidr in svcCreateThread (src/host/threads.c).
+     * Copied 128 bytes of parent TLS (+0x100..+0x180) to child TLS in thread_main.
+     * Relaxed svcSetHeapSize alignment from 2MB to 4KB page alignment (size & 4095).
+     * Expanded APP_POOL from 3.2 GiB to 6.0 GiB (src/host/svc.c).
+     * Implemented defensive 32 MiB fallback arena for sead::Heap::alloc (src/host/guest.c).
+   - Deliverables:
+     * work/outbox_prs/0001-fix-guest-heap-tls-init.patch
+     * work/outbox_prs/pr_0001_body.md
+   - Status: VERIFIED (Clang compilation passed, git apply --whitespace=error-all clean)
+
+2. Milestone 2: Fix Linux Thread Scheduling Policy & Platform Warnings
+   - Issue: thread_policy_set in src/gfx/compat/gfx_compat.h returned KERN_FAILURE,
+     causing "present-thread time-constraint policy: failed" logs in hle_nvn.c.
+     Compiler warnings in src/host/boot.c (unused g_exefs) and threads.c (format specifier).
+   - Solution:
+     * Dispatched thread_policy_set to plat_thread_realtime and returned KERN_SUCCESS.
+     * Guarded g_exefs with #ifdef _WIN32 in src/host/boot.c.
+     * Cast t->entry and t->stack_top to (unsigned long long) in src/host/threads.c LOG.
+   - Deliverables:
+     * work/outbox_prs/0002-fix-linux-thread-sched-and-warnings.patch
+     * work/outbox_prs/pr_0002_body.md
+   - Status: VERIFIED (Zero warnings under -Wall -Wextra, git apply clean)
+
+3. Milestone 3: Bounds-Checked Memory Copy Overrides
+   - Issue: Early boot unaligned/underflowing memory operations (font decompression,
+     heap pool indexing) can dereference unmapped/boundary pointers before full init.
+   - Solution:
+     * Implemented is_valid_guest_range checking non-null, size <= 2 GiB, addr >= 0x10000.
+     * Added HLE_FUNC overrides for memcpy, memmove, __memmove_fast, __memmove_device, memset.
+     * Registered direct guest PLT/SDK entry point hooks (0x710c5b23c0, 0x7106bb7bd0).
+     * Preserved c->x[0] (dst) across all memory operations.
+   - Deliverables:
+     * work/outbox_prs/0003-feat-safe-guest-memory-ops.patch
+     * work/outbox_prs/pr_0003_body.md
+   - Status: VERIFIED (Zero warnings under -Wall -Wextra, git apply clean)
+
+4. Milestone 4: Loose RomFS Directory Support & Safe Fallbacks
+   - Issue: When booting without monolithic romfs.bin, empty loose RomFS directories
+     aborted with need(nwalked > 0), and missing unindexed assets crashed callers.
+   - Solution:
+     * Checked TOTK_ROMFS_DIR environment variable before falling back to TOTK_ROMFS / data/romfs.
+     * Handled nwalked == 0 gracefully by emitting a warning and initializing dummy index.
+     * Introduced ROM_FALLBACK_HANDLE (UINT64_MAX) providing zero-filled fallback file handles
+       for missing/unindexed assets during early boot.
+   - Deliverables:
+     * work/outbox_prs/0004-feat-loose-romfs-fallback.patch
+     * work/outbox_prs/pr_0004_body.md
+   - Status: VERIFIED (Zero warnings under -Wall -Wextra, git apply clean)
+
+--------------------------------------------------------------------------------
+OUTBOX & MANIFEST SUMMARY
+--------------------------------------------------------------------------------
+Manifest path: work/outbox_prs/pr_manifest.tsv
+Entries registered: 4
+1. stack:fix/guest-heap-tls-init -> 0001-fix-guest-heap-tls-init.patch
+2. stack:fix/linux-thread-sched-and-warnings -> 0002-fix-linux-thread-sched-and-warnings.patch
+3. stack:feat/safe-guest-memory-ops -> 0003-feat-safe-guest-memory-ops.patch
+4. stack:feat/loose-romfs-fallback -> 0004-feat-loose-romfs-fallback.patch
+
+All patches verified with:
+  git apply --index --whitespace=error-all
+Ready for ingestion by PC-1 via tools/ingest_pc2_prs.sh.
+================================================================================

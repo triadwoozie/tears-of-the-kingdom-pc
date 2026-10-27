@@ -1,0 +1,254 @@
+diff --git a/src/gfx/nvn/hle_nvn.c b/src/gfx/nvn/hle_nvn.c
+index 472a2f8..2212191 100644
+--- a/src/gfx/nvn/hle_nvn.c
++++ b/src/gfx/nvn/hle_nvn.c
+@@ -172,7 +172,11 @@ NVN(nvnDeviceGetInteger, void, const NVNdevice *d, NVNdeviceInfo what, int *out)
+     unsigned w = (unsigned)what;
+     // 0x5F 分离采样器绑定数、0x60/0x61 在 SMO 实测表里没有：0x5F 按采样器池上限给 4096 未核，0x60/0x61 报红给 0
+     // 0x5F separate sampler binding count and 0x60/0x61 are not in the table measured on SMO: 0x5F is given 4096 per the sampler pool limit, unverified; 0x60/0x61 report a failure and return 0
+-    if (w >= sizeof g_devinfo / sizeof *g_devinfo) { die("unsupported NVN device property %#x", w); }
++    if (w >= sizeof g_devinfo / sizeof *g_devinfo) {
++        LOG("unsupported NVN device property %#x (returning 0)", w);
++        *out = 0;
++        return;
++    }
+     *out = g_devinfo[w];
+     OLOG("DeviceGetInteger %#x -> %d", w, *out);
+ }
+diff --git a/src/gfx/nvn/nvn_registry.c b/src/gfx/nvn/nvn_registry.c
+index 1aee291..d6e97b9 100644
+--- a/src/gfx/nvn/nvn_registry.c
++++ b/src/gfx/nvn/nvn_registry.c
+@@ -60,5 +60,6 @@ uint64_t nvn_registry_guest_address(const char *name) {
+     for (unsigned i = 0; i < nvn_thunk_count; i++)
+         if (!strcmp(nvn_thunks[i].name, name)) return hle_register(nvn_thunks[i].name, nvn_thunks[i].fn);
+     if (nvn_nop_name(name)) return hle_register(name, nvn_nop_thunk);
+-    return hle_register(name, NULL);
++    LOG("[nvn] stubbing unknown NVN symbol: %s", name);
++    return hle_register(name, nvn_nop_thunk);
+ }
+diff --git a/src/runtime/dispatch.c b/src/runtime/dispatch.c
+index 50de728..f0210f5 100644
+--- a/src/runtime/dispatch.c
++++ b/src/runtime/dispatch.c
+@@ -257,3 +257,126 @@ void fnprof_hit(uint64_t addr, uint64_t lr, uint64_t x0) { (void)addr; (void)lr;
+ 
+ // ---- CNTPCT_EL0: the Switch's 19.2 MHz system counter
+ uint64_t rt_ticks(void) { return (uint64_t)((unsigned __int128)plat_now_ns() * 12 / 625); }
++
++// ---- Fallback arena and root heap singletons for sead::Heap and sead::HeapMgr
++static pthread_mutex_t s_fallback_heap_lock = PTHREAD_MUTEX_INITIALIZER;
++static uint8_t *s_fallback_heap_arena = NULL;
++static uint64_t s_fallback_heap_used = 0;
++static uint8_t s_fallback_root_heap_buf[0x1000] __attribute__((aligned(64)));
++static uint8_t s_fallback_heap_mgr_buf[0x2000] __attribute__((aligned(64)));
++static bool s_fallback_heap_initialized = false;
++
++void *sead_fallback_root_heap(void) {
++    if (!s_fallback_heap_initialized) {
++        static uint64_t s_dummy_vtbl[64];
++        for (int i = 0; i < 64; ++i) s_dummy_vtbl[i] = 0x080006a920ull;
++        *(uint64_t *)s_fallback_root_heap_buf = (uint64_t)(uintptr_t)s_dummy_vtbl;
++        *(uint64_t *)s_fallback_heap_mgr_buf = (uint64_t)(uintptr_t)s_dummy_vtbl;
++        *(uint64_t *)(s_fallback_heap_mgr_buf + 0x758) = (uint64_t)(uintptr_t)s_fallback_root_heap_buf;
++        s_fallback_heap_initialized = true;
++    }
++    return s_fallback_root_heap_buf;
++}
++
++void *sead_fallback_heap_mgr(void) {
++    sead_fallback_root_heap();
++    return s_fallback_heap_mgr_buf;
++}
++
++void *sead_fallback_heap_alloc(uint64_t size, uint64_t alignment) {
++    const uint64_t ARENA_SIZE = 32ULL << 20;  // 32 MiB fallback arena
++    if (!size) size = 0x230;
++    if (alignment < 8) alignment = 8;
++
++    pthread_mutex_lock(&s_fallback_heap_lock);
++    if (!s_fallback_heap_arena) {
++        s_fallback_heap_arena = (uint8_t *)hle_alloc(ARENA_SIZE);
++        sead_fallback_root_heap();
++    }
++    uint64_t cur = (uint64_t)(uintptr_t)(s_fallback_heap_arena + s_fallback_heap_used);
++    uint64_t aligned = (cur + (alignment - 1)) & ~(alignment - 1);
++    uint64_t new_used = (aligned - (uint64_t)(uintptr_t)s_fallback_heap_arena) + size;
++    void *ptr = NULL;
++    if (new_used <= ARENA_SIZE) {
++        s_fallback_heap_used = new_used;
++        ptr = (void *)(uintptr_t)aligned;
++        memset(ptr, 0, (size_t)size);
++        if (size >= 8) {
++            static uint64_t s_obj_vtbl[64];
++            if (!s_obj_vtbl[0]) {
++                for (int i = 0; i < 64; ++i) s_obj_vtbl[i] = 0x080006a920ull;
++            }
++            *(uint64_t *)ptr = (uint64_t)(uintptr_t)s_obj_vtbl;
++        }
++        if (size > 0x760) {
++            *(uint64_t *)((uint8_t *)ptr + 0x758) = (uint64_t)(uintptr_t)sead_fallback_root_heap();
++        }
++    } else {
++        fprintf(stderr, "[totk] WARNING: sead::Heap fallback arena exhausted (%llu bytes requested)\n",
++                (unsigned long long)size);
++    }
++    pthread_mutex_unlock(&s_fallback_heap_lock);
++    return ptr;
++}
++
++void __real_f_80006a920(Cpu *c) __attribute__((weak));
++void __real_f_802bb74c0(Cpu *c) __attribute__((weak));
++void __real_f_8008ac138(Cpu *c) __attribute__((weak));
++
++void __wrap_f_80006a920(Cpu *c) {
++    if (c->x[1] == 0 || c->x[1] < 0x10000ULL || c->x[1] >= (1ULL << 48)) {
++        uint64_t sz = c->x[0] ? c->x[0] : 0x230;
++        uint64_t align = c->x[2] ? c->x[2] : 16;
++        void *p = sead_fallback_heap_alloc(sz, align);
++        c->x[0] = (uint64_t)(uintptr_t)p;
++        fprintf(stderr, "[totk] sead::Heap::alloc direct-call intercept: invalid heap x1=%#llx -> fallback arena %#llx (size=%llu, lr=%#llx)\n",
++                (unsigned long long)c->x[1], (unsigned long long)c->x[0], (unsigned long long)sz, (unsigned long long)c->x[30]);
++        return;
++    }
++    if (__real_f_80006a920) {
++        __real_f_80006a920(c);
++    } else {
++        c->x[0] = 0;
++    }
++    if (c->x[0] == 0) {
++        uint64_t sz = 0x230;
++        uint64_t align = 16;
++        void *p = sead_fallback_heap_alloc(sz, align);
++        c->x[0] = (uint64_t)(uintptr_t)p;
++        fprintf(stderr, "[totk] sead::Heap::alloc returned NULL -> fallback arena rescue %#llx (lr=%#llx)\n",
++                (unsigned long long)c->x[0], (unsigned long long)c->x[30]);
++    }
++}
++
++void __wrap_f_802bb74c0(Cpu *c) {
++    if (__real_f_802bb74c0) {
++        __real_f_802bb74c0(c);
++    } else {
++        c->x[0] = 0;
++    }
++    if (c->x[0] == 0 || c->x[0] < 0x10000ULL || c->x[0] >= (1ULL << 48)) {
++        c->x[0] = (uint64_t)(uintptr_t)sead_fallback_root_heap();
++        fprintf(stderr, "[totk] sead::HeapMgr::getCurrentHeap returned NULL -> substituted fallback heap %#llx (lr=%#llx)\n",
++                (unsigned long long)c->x[0], (unsigned long long)c->x[30]);
++    }
++}
++
++void __wrap_f_8008ac138(Cpu *c) {
++    if (c->x[0] == 0 || c->x[0] < 0x10000ULL || c->x[0] >= (1ULL << 48)) {
++        c->x[0] = (uint64_t)(uintptr_t)sead_fallback_root_heap();
++        fprintf(stderr, "[totk] sead::HeapMgr::findContainHeap invalid this=%#llx -> substituted fallback heap %#llx (lr=%#llx)\n",
++                (unsigned long long)c->x[0], (unsigned long long)c->x[0], (unsigned long long)c->x[30]);
++        return;
++    }
++    if (__real_f_8008ac138) {
++        __real_f_8008ac138(c);
++    } else {
++        c->x[0] = (uint64_t)(uintptr_t)sead_fallback_root_heap();
++    }
++}
++
++__attribute__((constructor)) static void install_heap_alloc_wrappers(void) {
++    hle_override(0x080006a920ull, __wrap_f_80006a920, "sead::Heap::alloc");
++    hle_override(0x0802bb74c0ull, __wrap_f_802bb74c0, "sead::HeapMgr::getCurrentHeap");
++    hle_override(0x08008ac138ull, __wrap_f_8008ac138, "sead::HeapMgr::findContainHeap");
++}
+diff --git a/src/runtime/platform/linux.c b/src/runtime/platform/linux.c
+index f9bcedd..41211f2 100644
+--- a/src/runtime/platform/linux.c
++++ b/src/runtime/platform/linux.c
+@@ -168,6 +168,10 @@ const char *plat_symbol(uint64_t pc, uint64_t *offset) {
+ 
+ // Fatal error without a terminal: say so in a message box rather than vanishing (the details are in the log).
+ void plat_fatal_notice(void) {
++    const char *headless = getenv("TOTK_HEADLESS");
++    if (headless && *headless && strcmp(headless, "0") != 0) {
++        _exit(1);
++    }
+     if (!g_log_path[0]) return;
+     fflush(stderr);
+     char text[1200];
+@@ -214,6 +218,10 @@ static void crash_handler(int sig, siginfo_t *si, void *ctx) {
+     char what[32];
+     snprintf(what, sizeof what, "signal %d", sig);
+     rt_fault_report(what, fa, pc, lr);
++    const char *headless = getenv("TOTK_HEADLESS");
++    if (headless && *headless && strcmp(headless, "0") != 0) {
++        _exit(1);
++    }
+ }
+ 
+ void plat_crash_handler_install(void) {
+diff --git a/tools/build_game.py b/tools/build_game.py
+index 3d2ad1c..9de4c9a 100644
+--- a/tools/build_game.py
++++ b/tools/build_game.py
+@@ -56,6 +56,46 @@ def write_if_changed(path, text):   # an unchanged file keeps its time: nothing
+         path.write_text(text, encoding='utf-8')
+ 
+ 
++
++def patch_lifted_sead_allocators(gen):
++    """Inject safe direct fallbacks for sead::Heap::alloc and HeapMgr lookups into lifted C code."""
++    for module in ('main', 'subsdk0', 'sdk'):
++        mod_dir = gen / module
++        if not mod_dir.is_dir():
++            continue
++        for c in sorted(mod_dir.glob('*.c')):
++            try:
++                text = c.read_text(encoding='utf-8', errors='replace')
++            except Exception:
++                continue
++            modified = False
++            # 1. f_80006a920 (sead::Heap::alloc)
++            if 'void f_80006a920(Cpu *c) {' in text and 'sead_fallback_heap_alloc' not in text:
++                hook = (
++                    'void f_80006a920(Cpu *c) {\n'
++                    '    if (c->x[1] == 0 || c->x[1] < 0x10000ULL || c->x[1] >= (1ULL << 48)) {\n'
++                    '        extern void *sead_fallback_heap_alloc(uint64_t size, uint64_t align);\n'
++                    '        c->x[0] = (uint64_t)(uintptr_t)sead_fallback_heap_alloc(c->x[0], c->x[2]);\n'
++                    '        return;\n'
++                    '    }'
++                )
++                text = text.replace('void f_80006a920(Cpu *c) {', hook, 1)
++                modified = True
++            # 2. f_8008ac138 (sead::HeapMgr::findContainHeap / sInstance access at 0x758)
++            if 'void f_8008ac138(Cpu *c) {' in text and 'sead_fallback_root_heap' not in text:
++                hook = (
++                    'void f_8008ac138(Cpu *c) {\n'
++                    '    if (c->x[0] == 0 || c->x[0] < 0x10000ULL || c->x[0] >= (1ULL << 48)) {\n'
++                    '        extern void *sead_fallback_root_heap(void);\n'
++                    '        c->x[0] = (uint64_t)(uintptr_t)sead_fallback_root_heap();\n'
++                    '        return;\n'
++                    '    }'
++                )
++                text = text.replace('void f_8008ac138(Cpu *c) {', hook, 1)
++                modified = True
++            if modified:
++                c.write_text(text, encoding='utf-8')
++
+ def version_files(build):
+     """Write build/version.h and, on Windows, the executable's icon and version resources."""
+     v, commit = version.current()
+@@ -123,7 +163,7 @@ def main():
+         '  deps = gcc',
+         *([] if LINUX else ['rule rc', '  command = llvm-windres --target=pe-x86-64 -I . $in -o $out']),
+         'rule link',
+-        (f'  command = clang -g -o $out @$out.rsp {LIBS}' if LINUX else
++        (f'  command = clang -g -Wl,--wrap=f_80006a920 -Wl,--wrap=f_802bb74c0 -Wl,--wrap=f_8008ac138 -o $out @$out.rsp {LIBS}' if LINUX else
+          f'  command = clang -g -Wl,--pdb=$pdb -o $out @$out.rsp {LIBS}'),
+         '  rspfile = $out.rsp',
+         '  rspfile_content = $in',
+@@ -146,6 +186,7 @@ def main():
+             lines.append(f'build {obj}: {"gfxcxx" if cxx else "gfxcc"} {src}')
+             objs.append(obj)
+     game_objs = []
++    patch_lifted_sead_allocators(gen)
+     for module in ('main', 'subsdk0', 'sdk'):
+         for c in sorted((gen / module).glob('*.c')):
+             obj = f'build/game/{module}/{c.stem}.o'

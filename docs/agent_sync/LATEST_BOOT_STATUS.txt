@@ -1,0 +1,22 @@
+Remote commit: 0c0327caa906c7359051c1aeaedf2d992f77ee4f
+Boot exit status: 139
+  [HLE NVN] nvnDeviceGetProcAddress('nvnCommandBufferInsertCheckpointDynamic') -> 0x71800020d0
+  [HLE NVN] nvnDeviceGetProcAddress('nvnCommandBufferSetZCullZF32CompressionEnable') -> 0x71800020e0
+  [HLE NVN] nvnDeviceGetProcAddress('nvnCommandBufferSetProvokingVertexMode') -> 0x71800020f0
+  [HLE NVN] nvnDeviceGetProcAddress('nvnDeviceSetAutomaticCheckpointsEnable') -> 0x7180002100
+  [HLE NVN] nvnDeviceGetProcAddress('nvnDeviceSetAutomaticCheckpointsMask') -> 0x7180002110
+  [HLE NVN] nvnDeviceGetProcAddress('nvnDeviceSetAutomaticCheckpointsSamplingInterval') -> 0x7180002120
+  [HLE NVN] nvnDeviceGetProcAddress('nvnDeviceSetAutomaticCheckpointsByDebugGroup') -> 0x7180002130
+  [HLE NVN] nvnDeviceGetProcAddress('nvnDeviceSetCheckpointCallStacksEnable') -> 0x7180002140
+  [HLE NVN] nvnDeviceGetProcAddress('nvnDeviceSetCheckpointMaxCallStacksDepth') -> 0x7180002150
+  [IPC Dispatch] handle=0x10001 kind=sm: cmd=1 ctrl=0 dom=0 (raw cmif: 0x0)
+  [IPC Dispatch] handle=0x1000c kind=acc:u0 cmd=160 ctrl=0 dom=1 (raw cmif: 0x30)
+  [IPC Dispatch] handle=0x1000c kind=acc:u0 cmd=150 ctrl=0 dom=1 (raw cmif: 0x20)
+  [Kernel HLE svcSignalToAddress] th=0x1 (MainThread) addr=0x722346fdc0 type=1 val=1 count=-1
+  [IPC Dispatch] handle=0x10001 kind=sm: cmd=1 ctrl=0 dom=0 (raw cmif: 0x0)
+  [IPC Dispatch] handle=0x1000d kind=hid cmd=21 ctrl=0 dom=0 (raw cmif: 0x20)
+  [IPC Dispatch] handle=0x1000d kind=hid cmd=31 ctrl=0 dom=0 (raw cmif: 0x20)
+  [Kernel HLE svcSignalToAddress] th=0x1 (MainThread) addr=0x722346fdc0 type=1 val=1 count=-1
+  - Thread 0x1 (MainThread) [Running]: PC=0x7104064db0 LR=0x71046b7b20 SP=0x708033d250
+  - Thread 0x1 (MainThread) [Running]: PC=0x7104c6486c LR=0x71046b778c SP=0x708033d270
+  - Thread 0x1 (MainThread) [Running]: PC=0x7104c6486c LR=0x71046b778c SP=0x708033d270

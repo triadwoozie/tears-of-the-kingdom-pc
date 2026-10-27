@@ -411,7 +411,7 @@ void guest_indirect_call(Arm64Context *ctx, uint64_t target_addr) {
                                     static_cast<unsigned long long>(t->current_sp.load()));
                         if (t->handle == 1) {
                             uint64_t cur_fp = t->current_fp.load();
-                            for (int f = 0; f < 10 && cur_fp >= 0x7000000000ULL && cur_fp < 0x7300000000ULL && (cur_fp & 7) == 0; ++f) {
+                            for (int f = 0; f < 10 && cur_fp >= 0x7000000000ULL && cur_fp < totk::runtime::GUEST_MEMORY_LIMIT && (cur_fp & 7) == 0; ++f) {
                                 uint64_t caller_lr = *reinterpret_cast<uint64_t *>(cur_fp + 8);
                                 uint64_t prev_fp = *reinterpret_cast<uint64_t *>(cur_fp);
                                 const char *sym = lookup_symbol_name(caller_lr);
@@ -623,7 +623,7 @@ void rt_svc(Arm64Context *c, uint32_t imm, uint64_t pc) {
                     break;
                 }
             }
-            if (dst >= 0x7000000000ULL && dst < 0x7300000000ULL && size > 0) {
+            if (dst >= 0x7000000000ULL && dst < totk::runtime::GUEST_MEMORY_LIMIT && size > 0) {
                 totk::runtime::MemoryManager::instance().commit(dst, size);
             }
             c->x[0] = totk::runtime::ResultSuccess;
@@ -734,11 +734,11 @@ void rt_svc(Arm64Context *c, uint32_t imm, uint64_t pc) {
 
             *reinterpret_cast<uint64_t *>(tlr_addr + 0x1f0) = tls_addr;
             *reinterpret_cast<uint64_t *>(tlr_addr + 0x1f8) = t.arg;
-            if (t.arg >= 0x7000000000ULL && t.arg < 0x7300000000ULL) {
+            if (t.arg >= 0x7000000000ULL && t.arg < totk::runtime::GUEST_MEMORY_LIMIT) {
                 *reinterpret_cast<uint32_t *>(t.arg + 0x1b0) = handle;
             }
 
-            if (t.stack_top >= 0x7000000000ULL && t.stack_top < 0x7300000000ULL) {
+            if (t.stack_top >= 0x7000000000ULL && t.stack_top < totk::runtime::GUEST_MEMORY_LIMIT) {
                 uint64_t stack_base = (t.stack_top > 0x100000ULL) ? (t.stack_top - 0x100000ULL) : 0x7000000000ULL;
                 totk::runtime::MemoryManager::instance().commit(stack_base, 0x100000ULL);
             }
@@ -902,7 +902,7 @@ void rt_svc(Arm64Context *c, uint32_t imm, uint64_t pc) {
             uint32_t handle = static_cast<uint32_t>(c->x[0]);
             uint64_t addr = c->x[1];
             uint64_t size = c->x[2];
-            if (addr >= 0x7000000000ULL && addr < 0x7300000000ULL && size > 0) {
+            if (addr >= 0x7000000000ULL && addr < totk::runtime::GUEST_MEMORY_LIMIT && size > 0) {
                 totk::runtime::MemoryManager::instance().commit(addr, size);
                 if (handle == 0x30001 || (addr & 0xFFF) == 0) {
                     uint8_t *m = reinterpret_cast<uint8_t *>(addr);
@@ -943,7 +943,7 @@ void rt_svc(Arm64Context *c, uint32_t imm, uint64_t pc) {
             static std::atomic<uint32_t> s_tmem_counter{0x30000};
             uint32_t thandle = s_tmem_counter++;
             uint64_t out_slot = c->x[0];
-            if (out_slot >= 0x7000000000ULL && out_slot < 0x7300000000ULL) {
+            if (out_slot >= 0x7000000000ULL && out_slot < totk::runtime::GUEST_MEMORY_LIMIT) {
                 *reinterpret_cast<uint32_t *>(out_slot) = thandle;
             }
             c->x[0] = totk::runtime::ResultSuccess;
@@ -1035,7 +1035,7 @@ void rt_svc(Arm64Context *c, uint32_t imm, uint64_t pc) {
             auto *t = cur_guest_thread();
             std::unique_lock<std::mutex> lock(s_sync_mtx);
             int64_t r = 0;
-            if (addr >= 0x7000000000ULL && addr < 0x7300000000ULL) {
+            if (addr >= 0x7000000000ULL && addr < totk::runtime::GUEST_MEMORY_LIMIT) {
                 if (ld32(addr) == (owner | WAITERS_BIT)) {
                     t->waddr = addr;
                     t->wtag = tag;
@@ -1048,7 +1048,7 @@ void rt_svc(Arm64Context *c, uint32_t imm, uint64_t pc) {
         case 0x1b: { // svcArbitrateUnlock(addr)
             uint64_t addr = c->x[0];
             std::unique_lock<std::mutex> lock(s_sync_mtx);
-            if (addr >= 0x7000000000ULL && addr < 0x7300000000ULL) {
+            if (addr >= 0x7000000000ULL && addr < totk::runtime::GUEST_MEMORY_LIMIT) {
                 lock_handoff(addr);
             }
             c->x[0] = totk::runtime::ResultSuccess;
@@ -1134,13 +1134,13 @@ void rt_svc(Arm64Context *c, uint32_t imm, uint64_t pc) {
                          static_cast<unsigned long long>(c->pc),
                          static_cast<unsigned long long>(lr),
                          static_cast<unsigned long long>(fp));
-            for (int depth = 1; depth < 16 && fp > 0x7000000000ULL && fp < 0x7300000000ULL; ++depth) {
+            for (int depth = 1; depth < 16 && fp > 0x7000000000ULL && fp < totk::runtime::GUEST_MEMORY_LIMIT; ++depth) {
                 uint64_t prev_fp = *reinterpret_cast<uint64_t *>(fp);
                 uint64_t caller_lr = *reinterpret_cast<uint64_t *>(fp + 8);
                 std::fprintf(stderr, "    #%02d LR=0x%016llx (FP=0x%016llx)\n", depth,
                              static_cast<unsigned long long>(caller_lr),
                              static_cast<unsigned long long>(prev_fp));
-                if (prev_fp <= fp || prev_fp >= 0x7300000000ULL) break;
+                if (prev_fp <= fp || prev_fp >= totk::runtime::GUEST_MEMORY_LIMIT) break;
                 fp = prev_fp;
             }
             std::fprintf(stderr, "=======================================================\n\n");
@@ -1189,7 +1189,7 @@ void rt_svc(Arm64Context *c, uint32_t imm, uint64_t pc) {
         case 0x2c: { // svcSetProcessMemoryPermission
             uint64_t addr = c->x[0];
             uint64_t size = c->x[1];
-            if (addr >= 0x7000000000ULL && addr < 0x7300000000ULL && size > 0) {
+            if (addr >= 0x7000000000ULL && addr < totk::runtime::GUEST_MEMORY_LIMIT && size > 0) {
                 totk::runtime::MemoryManager::instance().commit(addr, size);
             }
             c->x[0] = totk::runtime::ResultSuccess;
@@ -1204,7 +1204,7 @@ void rt_svc(Arm64Context *c, uint32_t imm, uint64_t pc) {
             int type = static_cast<int>(c->x[1]);
             int32_t val = static_cast<int32_t>(c->x[2]);
             int64_t timeout_ns = static_cast<int64_t>(c->x[3]);
-            if (addr < 0x7000000000ULL || addr >= 0x7300000000ULL) {
+            if (addr < 0x7000000000ULL || addr >= totk::runtime::GUEST_MEMORY_LIMIT) {
                 c->x[0] = R_BAD_STATE;
                 break;
             }
@@ -1236,7 +1236,7 @@ void rt_svc(Arm64Context *c, uint32_t imm, uint64_t pc) {
             int type = static_cast<int>(c->x[1]);
             int32_t val = static_cast<int32_t>(c->x[2]);
             int count = static_cast<int>(c->x[3]);
-            if (addr < 0x7000000000ULL || addr >= 0x7300000000ULL) {
+            if (addr < 0x7000000000ULL || addr >= totk::runtime::GUEST_MEMORY_LIMIT) {
                 c->x[0] = R_BAD_STATE;
                 break;
             }

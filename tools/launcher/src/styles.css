@@ -19,9 +19,20 @@
   background: #D08D1C;
 }
 
+[data-theme="sky-island-light"] ::-webkit-scrollbar-track {
+  background: #EAE2C8;
+}
+[data-theme="sky-island-light"] ::-webkit-scrollbar-thumb {
+  background: #D5C8A3;
+  border-color: rgba(22, 32, 27, 0.15);
+}
+[data-theme="sky-island-light"] ::-webkit-scrollbar-thumb:hover {
+  background: #B87914;
+}
+
 /* Purah Pad concentric scope grid */
 .purah-scope-grid {
-  background-image:
+  background-image: 
     radial-gradient(circle, rgba(99, 167, 188, 0.15) 1px, transparent 1px),
     linear-gradient(to right, rgba(99, 167, 188, 0.08) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(99, 167, 188, 0.08) 1px, transparent 1px);
@@ -31,13 +42,14 @@
 
 /* Tab active state refinement */
 .tabs-bordered .tab.tab-active {
-  border-bottom-color: #E8BF40 !important;
+  border-bottom-color: #D08D1C !important;
   border-bottom-width: 2px !important;
   color: #EDE6D1 !important;
-  font-weight: 600;
+  font-weight: 700;
 }
 
-/* Zonai concentric circle pattern watermark */
-.zonai-watermark {
-  background-image: radial-gradient(circle at center, transparent 30%, rgba(208, 141, 28, 0.04) 31%, rgba(208, 141, 28, 0.04) 33%, transparent 34%, transparent 50%, rgba(99, 167, 188, 0.05) 51%, rgba(99, 167, 188, 0.05) 53%, transparent 54%);
+[data-theme="sky-island-light"] .tabs-bordered .tab.tab-active {
+  border-bottom-color: #B87914 !important;
+  color: #16201B !important;
+  font-weight: 700;
 }

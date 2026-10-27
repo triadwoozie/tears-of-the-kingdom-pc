@@ -1,7 +1,12 @@
 #include "hlr_sead.h"
 #include "recompiler/dispatch.h"
 #include "recompiler/arm64_ctx.h"
+#include "graphics/headless_bridge.h"
+#include "runtime/filesystem_hle.h"
+#include "runtime/game_framework_hle.h"
 #include "runtime/memory_manager.h"
+#include "runtime/runtime_config.h"
+#include <algorithm>
 #include <cmath>
 #include <immintrin.h>
 #include <cstdio>
@@ -11,10 +16,22 @@
 #include <unordered_map>
 #include <thread>
 #include <chrono>
+#include <mutex>
+#include <string>
+#include <vector>
 
 namespace totk::hlr {
 
 static std::atomic<uint64_t> s_hlr_bump_heap{0x7222000000ULL};
+
+static bool is_mapped_guest_range(totk::runtime::MemoryManager &memory,
+                                  uint64_t address, size_t size) {
+    return memory.get_guest_base() != nullptr &&
+           address >= totk::runtime::GUEST_MEMORY_BASE &&
+           address <= totk::runtime::GUEST_MEMORY_LIMIT &&
+           size <= totk::runtime::GUEST_MEMORY_LIMIT - address &&
+           memory.commit(address, size);
+}
 
 static uint64_t hlr_bump_alloc(uint64_t size, uint64_t align) {
     if (size == 0) size = 0x40;
@@ -33,6 +50,24 @@ static uint64_t hlr_bump_alloc(uint64_t size, uint64_t align) {
     std::memset(reinterpret_cast<void *>(res), 0, (size < 256 ? size : 256));
     return res;
 }
+
+static uint64_t get_dummy_sead_resource() {
+    static const uint64_t s_dummy_resource = [] {
+        uint64_t resource = hlr_bump_alloc(0x200, 0x20);
+        uint64_t vtbl = hlr_bump_alloc(0x100, 0x10);
+        for (int i = 0; i < 32; ++i) {
+            *reinterpret_cast<uint64_t *>(vtbl + i * 8) = 0x7104214ea8ULL;
+        }
+        *reinterpret_cast<uint64_t *>(resource) = vtbl;
+        *reinterpret_cast<uint64_t *>(resource + 0x28) = hlr_bump_alloc(0x1000, 0x10);
+        *reinterpret_cast<uint32_t *>(resource + 0x30) = 0x1000;
+        *reinterpret_cast<uint8_t *>(resource + 0x58) = 1;
+        return resource;
+    }();
+    return s_dummy_resource;
+}
+
+#include "runtime/hlr_autogen.inc"
 
 static uint64_t get_safe_container_node() {
     static uint64_t s_node = 0;
@@ -92,6 +127,298 @@ static void hlr_alloc_hook(totk::recompiler::Arm64Context *c) {
 void register_sead_hlr_hooks() {
     using totk::recompiler::Arm64Context;
 
+    totk::recompiler::register_recompiled_func(0x7104bfe150ULL, [](Arm64Context *c) {
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   c->x[0], 0x280)) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint64_t sub = *reinterpret_cast<const uint64_t *>(c->x[0] + 0x270);
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   sub, 0x160)) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+
+        c->x[0] = 0;
+        c->pc = c->x[30];
+    });
+
+    totk::recompiler::register_recompiled_func(0x710415fb70ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+    });
+
+    totk::recompiler::register_recompiled_func(0x71049b7e80ULL, [](Arm64Context *c) {
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   c->x[0], 0xa6)) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint8_t flag = 0;
+        std::memcpy(&flag, reinterpret_cast<const void *>(c->x[0] + 0xa5),
+                    sizeof(flag));
+        if (flag & 1) {
+            uint64_t ret = 0;
+            std::memcpy(&ret, reinterpret_cast<const void *>(c->x[0] + 0x98),
+                        sizeof(ret));
+            c->x[0] = ret;
+        } else {
+            c->x[0] = 0;
+        }
+        c->pc = c->x[30];
+    });
+
+    totk::recompiler::register_recompiled_func(0x71049c8eccULL, [](Arm64Context *c) {
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   c->x[0], 0xa9)) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint8_t flag = 0;
+        std::memcpy(&flag, reinterpret_cast<const void *>(c->x[0] + 0xa8),
+                    sizeof(flag));
+        if (flag & 1) {
+            c->x[0] = c->x[0] + 0x68;
+        } else {
+            c->x[0] = 0;
+        }
+        c->pc = c->x[30];
+    });
+
+    totk::recompiler::register_recompiled_func(0x71049ba158ULL, [](Arm64Context *c) {
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   c->x[0], 0xa7)) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint8_t flag = 0;
+        std::memcpy(&flag, reinterpret_cast<const void *>(c->x[0] + 0xa6),
+                    sizeof(flag));
+        if (flag & 1) {
+            c->x[0] = c->x[0] + 0x38;
+        } else {
+            c->x[0] = 0;
+        }
+        c->pc = c->x[30];
+    });
+
+    totk::recompiler::register_recompiled_func(0x7104d23fe4ULL, [](Arm64Context *c) {
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   c->x[0], 0xaa)) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint8_t flag = 0;
+        std::memcpy(&flag, reinterpret_cast<const void *>(c->x[0] + 0xa9),
+                    sizeof(flag));
+        if (flag & 1) {
+            c->x[0] = c->x[0] + 0x60;
+        } else {
+            c->x[0] = 0;
+        }
+        c->pc = c->x[30];
+    });
+
+    totk::recompiler::register_recompiled_func(0x7104bf5200ULL, [](Arm64Context *c) {
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   c->x[0], 0x100)) {
+            static float s_default_val[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+            c->x[0] = reinterpret_cast<uint64_t>(&s_default_val);
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint8_t flag = 0;
+        std::memcpy(&flag, reinterpret_cast<const void *>(c->x[0] + 0xf4), 1);
+        (void)flag;
+        c->x[0] = c->x[0] + 0xd0;
+        c->pc = c->x[30];
+    });
+
+    totk::recompiler::register_recompiled_func(0x7104bf5278ULL, [](Arm64Context *c) {
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   c->x[0], 0x100)) {
+            static float s_default_val[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+            c->x[0] = reinterpret_cast<uint64_t>(&s_default_val);
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint8_t flag = 0;
+        std::memcpy(&flag, reinterpret_cast<const void *>(c->x[0] + 0xf5), 1);
+        (void)flag;
+        c->x[0] = c->x[0] + 0xd4;
+        c->pc = c->x[30];
+    });
+
+    totk::recompiler::register_recompiled_func(0x7104bf6268ULL, [](Arm64Context *c) {
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   c->x[0], 0x120)) {
+            static uint32_t s_zero[4] = {0, 0, 0, 0};
+            c->x[0] = reinterpret_cast<uint64_t>(&s_zero);
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint8_t flag = 0;
+        std::memcpy(&flag, reinterpret_cast<const void *>(c->x[0] + 0x11b), 1);
+        if (flag & 1) {
+            c->x[0] = c->x[0] + 0xb8;
+        } else {
+            c->x[0] = c->x[0] + 0xb8;
+        }
+        c->pc = c->x[30];
+    });
+
+    totk::recompiler::register_recompiled_func(0x7104bfed4cULL, [](Arm64Context *c) {
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   c->x[0], 0x61)) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint8_t flag = 0;
+        std::memcpy(&flag, reinterpret_cast<const void *>(c->x[0] + 0x60),
+                    sizeof(flag));
+        if (flag & 1) {
+            c->x[0] = c->x[0] + 0x30;
+        } else {
+            c->x[0] = c->x[0] + 0x30;
+            if (is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                      c->x[0], 0x20)) {
+                *reinterpret_cast<uint64_t *>(c->x[0] + 0x18) = 0;
+            }
+        }
+        c->pc = c->x[30];
+    });
+
+    totk::recompiler::register_recompiled_func(0x7104bfedb0ULL, [](Arm64Context *c) {
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   c->x[0], 0x62)) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint8_t flag = 0;
+        std::memcpy(&flag, reinterpret_cast<const void *>(c->x[0] + 0x61),
+                    sizeof(flag));
+        if (flag & 1) {
+            c->x[0] = c->x[0] + 0x58;
+        } else {
+            c->x[0] = c->x[0] + 0x58;
+            if (is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                      c->x[0], 0x20)) {
+                *reinterpret_cast<uint64_t *>(c->x[0] + 0x18) = 0;
+            }
+        }
+        c->pc = c->x[30];
+    });
+
+    totk::recompiler::register_recompiled_func(0x7104af51a4ULL, [](Arm64Context *c) {
+        if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                   c->x[0], 0x20)) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+        uint64_t cur = c->x[0];
+        uint32_t count = 0;
+        while (cur != 0 && count < 100000) {
+            if (!is_mapped_guest_range(totk::runtime::MemoryManager::instance(),
+                                       cur, 0x20)) break;
+            uint64_t next = *reinterpret_cast<const uint64_t *>(cur + 0x18);
+            count++;
+            if (next == 0) break;
+            cur = next;
+        }
+        c->x[0] = count;
+        c->pc = c->x[30];
+    });
+
+    // Avoid the original indirect calls, repairing missing sead singleton
+    // instances or vtables with no-op dummy objects when guest memory is ready.
+    totk::recompiler::register_recompiled_func(0x7104531f4cULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = totk::runtime::GUEST_MEMORY_BASE;
+        constexpr uint64_t guest_limit = totk::runtime::GUEST_MEMORY_LIMIT;
+        constexpr uint64_t dummy_method = 0x7104531f4cULL;
+        constexpr uint64_t singleton_slots[] = {
+            0x7107965000ULL + 0x358ULL,
+            0x710795e000ULL + 0xc38ULL,
+        };
+        static std::mutex singleton_mutex;
+        std::lock_guard<std::mutex> lock(singleton_mutex);
+
+        auto valid_guest_range = [](uint64_t address, uint64_t size) {
+            return address >= guest_base && address <= guest_limit &&
+                   size <= guest_limit - address;
+        };
+
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (memory.get_guest_base() != nullptr) {
+            for (uint64_t slot : singleton_slots) {
+                if (!valid_guest_range(slot, sizeof(uint64_t)) ||
+                    !memory.commit(slot, sizeof(uint64_t))) {
+                    continue;
+                }
+
+                uint64_t instance = *reinterpret_cast<const uint64_t *>(slot);
+                bool needs_dummy =
+                    instance == 0 || !valid_guest_range(instance, sizeof(uint64_t)) ||
+                    !memory.commit(instance, sizeof(uint64_t));
+                if (!needs_dummy) {
+                    const uint64_t vtable =
+                        *reinterpret_cast<const uint64_t *>(instance);
+                    needs_dummy =
+                        vtable == 0 || !valid_guest_range(vtable, sizeof(uint64_t)) ||
+                        !memory.commit(vtable, sizeof(uint64_t));
+                }
+
+                if (needs_dummy) {
+                    const uint64_t dummy_instance = hlr_bump_alloc(0x100, 0x10);
+                    const uint64_t dummy_vtable = hlr_bump_alloc(0x400, 0x20);
+                    for (uint64_t offset = 0; offset < 0x400; offset += sizeof(uint64_t)) {
+                        *reinterpret_cast<uint64_t *>(dummy_vtable + offset) = dummy_method;
+                    }
+                    *reinterpret_cast<uint64_t *>(dummy_instance) = dummy_vtable;
+                    *reinterpret_cast<uint64_t *>(slot) = dummy_instance;
+                }
+            }
+        }
+
+        c->x[0] = 0;
+        c->pc = c->x[30];
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_710421e70c =
+        totk::recompiler::lookup_recompiled_func(0x710421e70cULL);
+    (void)s_orig_710421e70c;
+    totk::recompiler::register_recompiled_func(0x710421e70cULL, [](Arm64Context *c) {
+        uint32_t total = 0;
+        uint64_t curr = c->x[0];
+        int depth = 0;
+        while (curr >= 0x7000000000ULL && curr < 0x7300000000ULL - 0x20 && depth < 64) {
+            total += *reinterpret_cast<uint32_t *>(curr + 0x8);
+            curr = *reinterpret_cast<uint64_t *>(curr + 0x18);
+            depth++;
+        }
+        c->x[0] = total;
+        c->pc = c->x[30];
+    });
+
     static totk::recompiler::RecompiledFunc s_orig_71043792d0 =
         totk::recompiler::lookup_recompiled_func(0x71043792d0ULL);
     totk::recompiler::register_recompiled_func(0x71043792d0ULL, [](Arm64Context *c) {
@@ -122,6 +449,37 @@ void register_sead_hlr_hooks() {
             s_orig_71043792d0(c);
         } else {
             c->x[0] = 0xffffffff;
+            c->pc = c->x[30];
+        }
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_71043d4a38 =
+        totk::recompiler::lookup_recompiled_func(0x71043d4a38ULL);
+    totk::recompiler::register_recompiled_func(0x71043d4a38ULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = 0x7000000000ULL;
+        constexpr uint64_t guest_limit = 0x7300000000ULL;
+
+        if (c->x[0] < guest_base || c->x[0] >= guest_limit) {
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint64_t target = (c->x[2] != 0) ? c->x[2] : c->x[7];
+        if (target < guest_base || target >= guest_limit - 0x100) {
+            target = hlr_bump_alloc(0x200, 0x10);
+            if (c->x[2] != 0) c->x[2] = target;
+            else c->x[7] = target;
+        }
+
+        *reinterpret_cast<uint64_t *>(target + 104) = 0;
+        *reinterpret_cast<uint32_t *>(target + 104 + 0x14) = 0;
+        *reinterpret_cast<uint32_t *>(target + 0x78) = 0;
+        *reinterpret_cast<uint32_t *>(target + 0xa8) = 1;
+        *reinterpret_cast<uint32_t *>(target + 0x88) = 0;
+
+        if (s_orig_71043d4a38) {
+            s_orig_71043d4a38(c);
+        } else {
             c->pc = c->x[30];
         }
     });
@@ -193,6 +551,71 @@ void register_sead_hlr_hooks() {
         }
     });
 
+    static totk::recompiler::RecompiledFunc s_orig_7104338564 =
+        totk::recompiler::lookup_recompiled_func(0x7104338564ULL);
+    totk::recompiler::register_recompiled_func(0x7104338564ULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = 0x7000000000ULL;
+        constexpr uint64_t guest_limit = 0x7300000000ULL;
+        auto fail = [c]() {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+        };
+
+        const uint64_t node = c->x[0];
+        if (node < guest_base || node >= guest_limit) {
+            fail();
+            return;
+        }
+        if (node > guest_limit - 0x18) {
+            fail();
+            return;
+        }
+
+        const uint64_t vtable = *reinterpret_cast<const uint64_t *>(node);
+        if (vtable < guest_base || vtable >= guest_limit - 0x100) {
+            fail();
+            return;
+        }
+
+        uint64_t *const fn_slot = reinterpret_cast<uint64_t *>(vtable + 0x80);
+        if (*fn_slot < 0x7100000000ULL || *fn_slot >= 0x7110000000ULL) {
+            *fn_slot = 0x71068eb97cULL;
+        }
+
+        const uint64_t next = *reinterpret_cast<const uint64_t *>(node + 0x10);
+        static thread_local std::unordered_set<uint64_t> visited_nodes;
+        static thread_local size_t recursion_depth = 0;
+        if (recursion_depth >= 32 || visited_nodes.contains(node)) {
+            fail();
+            return;
+        }
+
+        struct RecursionGuard {
+            std::unordered_set<uint64_t> &visited;
+            size_t &depth;
+            uint64_t node;
+
+            ~RecursionGuard() {
+                visited.erase(node);
+                --depth;
+            }
+        };
+
+        visited_nodes.insert(node);
+        ++recursion_depth;
+        RecursionGuard recursion_guard{visited_nodes, recursion_depth, node};
+        if (next != 0 && visited_nodes.contains(next)) {
+            fail();
+            return;
+        }
+
+        if (s_orig_7104338564) {
+            s_orig_7104338564(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
     // Hook universal sead::Heap::alloc (0x710406a920)
     totk::recompiler::register_recompiled_func(0x710406a920ULL, hlr_alloc_hook);
 
@@ -231,6 +654,75 @@ void register_sead_hlr_hooks() {
         }
         c->pc = c->x[30];
         c->x[0] = 0;
+    });
+
+    // Hook the internal audio/IPC accessor, which returns a status code.
+    totk::recompiler::register_recompiled_func(0x710c1f5fd0ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    // Hook the audio renderer device descriptor query (0x710c1f6040).
+    totk::recompiler::register_recompiled_func(0x710c1f6040ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    // Hook the remaining audio renderer query helpers.
+    totk::recompiler::register_recompiled_func(0x710c1f6b50ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    totk::recompiler::register_recompiled_func(0x710c1f61a0ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    totk::recompiler::register_recompiled_func(0x710c1f6c10ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    totk::recompiler::register_recompiled_func(0x710c1f6c70ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    totk::recompiler::register_recompiled_func(0x710c1f5f60ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    totk::recompiler::register_recompiled_func(0x710c1f69d0ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    totk::recompiler::register_recompiled_func(0x710c1f6a30ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    totk::recompiler::register_recompiled_func(0x710c1f6a90ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    totk::recompiler::register_recompiled_func(0x710c1f6ce0ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
     });
 
     // Hook nn::oe::Initialize (0x710c407930)
@@ -444,20 +936,32 @@ void register_sead_hlr_hooks() {
         c->pc = c->x[30];
     });
 
-    // Hook sead::ResourceMgr::load (0x7104214ea8)
-    totk::recompiler::register_recompiled_func(0x7104214ea8ULL, [](Arm64Context *c) {
-        std::printf("  [HLR Hook] sead::ResourceMgr::load (0x7104214ea8) from LR=0x%llx -> returning NULL\n",
-                    static_cast<unsigned long long>(c->x[30]));
-        std::fflush(stdout);
+    // Hook f_7104c9acf4 (safe null return)
+    totk::recompiler::register_recompiled_func(0x7104c9acf4ULL, [](Arm64Context *c) {
         c->x[0] = 0;
         c->pc = c->x[30];
+        return;
+    });
+
+    // Hook f_7104c904d0 to avoid dereferencing an invalid object or vtable.
+    totk::recompiler::register_recompiled_func(0x7104c904d0ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    // Hook sead::ResourceMgr::load (0x7104214ea8)
+    totk::recompiler::register_recompiled_func(0x7104214ea8ULL, [](Arm64Context *c) {
+        hlr_sead_resource_load(c);
     });
 
     // Hook sead::ResourceMgr::tryLoad (0x7104215360)
     totk::recompiler::register_recompiled_func(0x7104215360ULL, [](Arm64Context *c) {
-        std::printf("  [HLR Hook] sead::ResourceMgr::tryLoad (0x7104215360) from LR=0x%llx -> returning 0\n",
-                    static_cast<unsigned long long>(c->x[30]));
-        std::fflush(stdout);
+        hlr_sead_resource_load(c);
+    });
+
+    // Hook f_7104cb4a40 (system archive/resource package initializer)
+    totk::recompiler::register_recompiled_func(0x7104cb4a40ULL, [](Arm64Context *c) {
         c->x[0] = 0;
         c->pc = c->x[30];
     });
@@ -610,8 +1114,12 @@ void register_sead_hlr_hooks() {
 
     // Hook f_71048cb3dc (RenderBuffer setup)
     totk::recompiler::register_recompiled_func(0x71048cb3dcULL, [](Arm64Context *c) {
-        std::printf("  [HLR Hook] f_71048cb3dc (RenderBuffer init) -> clean return\n");
-        std::fflush(stdout);
+        if (totk::g_headless_mode) {
+            if (!totk::graphics::prepare_active_headless_render_target()) {
+                std::fprintf(stderr, "[HLR RenderBuffer] Failed to prepare headless Vulkan target.\n");
+            }
+            totk::runtime::signal_display_vsync_event();
+        }
         c->x[0] = 0;
         c->pc = c->x[30];
     });
@@ -794,6 +1302,33 @@ void register_sead_hlr_hooks() {
         }
         c->x[0] = s_dummy_res;
         c->pc = c->x[30];
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_71049b9afc =
+        totk::recompiler::lookup_recompiled_func(0x71049b9afcULL);
+    totk::recompiler::register_recompiled_func(0x71049b9afcULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = 0x7000000000ULL;
+        constexpr uint64_t guest_limit = 0x7300000000ULL;
+        if (c->x[0] < guest_base || c->x[0] >= guest_limit) {
+            c->pc = c->x[30];
+            return;
+        }
+        if (c->x[0] > guest_limit - 0x320) {
+            c->pc = c->x[30];
+            return;
+        }
+
+        uint64_t *node_slot = reinterpret_cast<uint64_t *>(c->x[0] + 0x318);
+        const uint64_t node = *node_slot;
+        if (node != 0 && (node < guest_base || node >= guest_limit - 0x20)) {
+            *node_slot = 0;
+        }
+        if (c->x[1] < guest_base || c->x[1] >= guest_limit) {
+            c->x[1] = hlr_bump_alloc(0x100, 0x10);
+        }
+
+        if (s_orig_71049b9afc) s_orig_71049b9afc(c);
+        else c->pc = c->x[30];
     });
 
     static totk::recompiler::RecompiledFunc s_orig_71049b7c88 =
@@ -1090,6 +1625,20 @@ void register_sead_hlr_hooks() {
         }
     });
 
+    // Clamp the SEAD/gsys lock table count before allocating mutex entries.
+    static totk::recompiler::RecompiledFunc s_orig_7104cccf80 =
+        totk::recompiler::lookup_recompiled_func(0x7104cccf80ULL);
+    totk::recompiler::register_recompiled_func(0x7104cccf80ULL, [](Arm64Context *c) {
+        if (c->x[2] > 64ULL) {
+            c->x[2] = std::min<uint64_t>(c->x[2], 64ULL);
+        }
+        if (s_orig_7104cccf80) {
+            s_orig_7104cccf80(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
     // Guard f_7104cb6dac (ares::System array allocator)
     static totk::recompiler::RecompiledFunc s_orig_7104cb6dac =
         totk::recompiler::lookup_recompiled_func(0x7104cb6dacULL);
@@ -1153,9 +1702,315 @@ void register_sead_hlr_hooks() {
         c->pc = c->x[30];
     });
 
-    // Guard f_71047088b0 (display buffer descriptor element init)
+    static totk::recompiler::RecompiledFunc s_orig_7104059b90 =
+        totk::recompiler::lookup_recompiled_func(0x7104059b90ULL);
+    totk::recompiler::register_recompiled_func(0x7104059b90ULL, [](Arm64Context *c) {
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (c->x[0] == 0 || !is_mapped_guest_range(memory, c->x[0], 0x48)) {
+            c->x[0] = 0;
+            c->pc = c->x[30];
+            return;
+        }
+        if (s_orig_7104059b90) {
+            s_orig_7104059b90(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
+    // Guard SEAD container setup functions against invalid container and heap pointers.
+    static totk::recompiler::RecompiledFunc s_orig_7104708408 =
+        totk::recompiler::lookup_recompiled_func(0x7104708408ULL);
+    totk::recompiler::register_recompiled_func(0x7104708408ULL, [](Arm64Context *c) {
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (c->x[0] == 0 || !is_mapped_guest_range(memory, c->x[0], sizeof(uint64_t)) ||
+            c->x[2] == 0 || !is_mapped_guest_range(memory, c->x[2], sizeof(uint64_t))) {
+            c->pc = c->x[30];
+            return;
+        }
+        if (s_orig_7104708408) {
+            s_orig_7104708408(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_710470851c =
+        totk::recompiler::lookup_recompiled_func(0x710470851cULL);
+    totk::recompiler::register_recompiled_func(0x710470851cULL, [](Arm64Context *c) {
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (c->x[0] == 0 || !is_mapped_guest_range(memory, c->x[0], sizeof(uint64_t)) ||
+            c->x[2] == 0 || !is_mapped_guest_range(memory, c->x[2], sizeof(uint64_t))) {
+            c->pc = c->x[30];
+            return;
+        }
+        if (s_orig_710470851c) {
+            s_orig_710470851c(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_7104708640 =
+        totk::recompiler::lookup_recompiled_func(0x7104708640ULL);
+    totk::recompiler::register_recompiled_func(0x7104708640ULL, [](Arm64Context *c) {
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (c->x[0] == 0 || !is_mapped_guest_range(memory, c->x[0], sizeof(uint64_t)) ||
+            c->x[2] == 0 || !is_mapped_guest_range(memory, c->x[2], sizeof(uint64_t))) {
+            c->pc = c->x[30];
+            return;
+        }
+        if (s_orig_7104708640) {
+            s_orig_7104708640(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_7104708704 =
+        totk::recompiler::lookup_recompiled_func(0x7104708704ULL);
+    totk::recompiler::register_recompiled_func(0x7104708704ULL, [](Arm64Context *c) {
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (c->x[0] == 0 || !is_mapped_guest_range(memory, c->x[0], sizeof(uint64_t)) ||
+            c->x[2] == 0 || !is_mapped_guest_range(memory, c->x[2], sizeof(uint64_t))) {
+            c->pc = c->x[30];
+            return;
+        }
+        if (s_orig_7104708704) {
+            s_orig_7104708704(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_7104708784 =
+        totk::recompiler::lookup_recompiled_func(0x7104708784ULL);
+    totk::recompiler::register_recompiled_func(0x7104708784ULL, [](Arm64Context *c) {
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (c->x[0] == 0 || !is_mapped_guest_range(memory, c->x[0], sizeof(uint64_t)) ||
+            c->x[2] == 0 || !is_mapped_guest_range(memory, c->x[2], sizeof(uint64_t))) {
+            c->pc = c->x[30];
+            return;
+        }
+        if (s_orig_7104708784) {
+            s_orig_7104708784(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_71047088b0 =
+        totk::recompiler::lookup_recompiled_func(0x71047088b0ULL);
     totk::recompiler::register_recompiled_func(0x71047088b0ULL, [](Arm64Context *c) {
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (c->x[0] == 0 || !is_mapped_guest_range(memory, c->x[0], sizeof(uint64_t)) ||
+            c->x[2] == 0 || !is_mapped_guest_range(memory, c->x[2], sizeof(uint64_t))) {
+            c->pc = c->x[30];
+            return;
+        }
+        if (s_orig_71047088b0) {
+            s_orig_71047088b0(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
+    // Guard f_7104707ef0 against invalid object and heap pointers.
+    static totk::recompiler::RecompiledFunc s_orig_7104707ef0 =
+        totk::recompiler::lookup_recompiled_func(0x7104707ef0ULL);
+    totk::recompiler::register_recompiled_func(0x7104707ef0ULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = totk::runtime::GUEST_MEMORY_BASE;
+        constexpr uint64_t guest_limit = totk::runtime::GUEST_MEMORY_LIMIT;
+        auto &memory = totk::runtime::MemoryManager::instance();
+        auto valid_guest_range = [&memory](uint64_t address, uint64_t size) {
+            return memory.get_guest_base() != nullptr &&
+                   address >= guest_base && address <= guest_limit &&
+                   size <= guest_limit - address &&
+                   memory.commit(address, static_cast<size_t>(size));
+        };
+
+        if (c->x[0] == 0 || !valid_guest_range(c->x[0], 0x1c) ||
+            !valid_guest_range(c->x[2], sizeof(uint64_t))) {
+            c->pc = c->x[30];
+            return;
+        }
+
+        if (s_orig_7104707ef0) {
+            s_orig_7104707ef0(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
+    // Guard f_7104708100 against invalid object and heap pointers.
+    static totk::recompiler::RecompiledFunc s_orig_7104708100 =
+        totk::recompiler::lookup_recompiled_func(0x7104708100ULL);
+    totk::recompiler::register_recompiled_func(0x7104708100ULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = totk::runtime::GUEST_MEMORY_BASE;
+        constexpr uint64_t guest_limit = totk::runtime::GUEST_MEMORY_LIMIT;
+        auto &memory = totk::runtime::MemoryManager::instance();
+        auto valid_guest_range = [&memory](uint64_t address, uint64_t size) {
+            return memory.get_guest_base() != nullptr &&
+                   address >= guest_base && address <= guest_limit &&
+                   size <= guest_limit - address &&
+                   memory.commit(address, static_cast<size_t>(size));
+        };
+
+        if (c->x[0] == 0 || !valid_guest_range(c->x[0], 0x1c) ||
+            !valid_guest_range(c->x[2], sizeof(uint64_t))) {
+            c->pc = c->x[30];
+            return;
+        }
+
+        if (s_orig_7104708100) {
+            s_orig_7104708100(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
+    // Guard f_7104707ff0 against invalid container and heap pointers.
+    static totk::recompiler::RecompiledFunc s_orig_7104707ff0 =
+        totk::recompiler::lookup_recompiled_func(0x7104707ff0ULL);
+    totk::recompiler::register_recompiled_func(0x7104707ff0ULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = totk::runtime::GUEST_MEMORY_BASE;
+        constexpr uint64_t guest_limit = totk::runtime::GUEST_MEMORY_LIMIT;
+        constexpr uint64_t max_elements = 0x100000;
+        auto &memory = totk::runtime::MemoryManager::instance();
+        auto valid_guest_range = [&memory](uint64_t address, uint64_t size) {
+            return address >= guest_base && address <= guest_limit &&
+                   size <= guest_limit - address &&
+                   memory.commit(address, static_cast<size_t>(size));
+        };
+
+        const bool invalid_container = !valid_guest_range(c->x[0], 0x78);
+        const bool invalid_heap = !valid_guest_range(c->x[2], sizeof(uint64_t));
+        if (invalid_container || invalid_heap || !s_orig_7104707ff0) {
+            if (invalid_container) {
+                c->x[0] = hlr_bump_alloc(0x80, 0x10);
+            }
+            if (invalid_heap) {
+                c->x[2] = get_default_heap();
+            }
+
+            c->x[1] = std::min(c->x[1], max_elements);
+            const uint64_t safe_buf =
+                hlr_bump_alloc(std::max<uint64_t>(c->x[1], 1) * sizeof(uint64_t), 0x10);
+            *reinterpret_cast<uint64_t *>(c->x[0] + 0x68) = c->x[1];
+            *reinterpret_cast<uint64_t *>(c->x[0] + 0x70) = safe_buf;
+            c->pc = c->x[30];
+            return;
+        }
+
+        s_orig_7104707ff0(c);
+    });
+
+    // Guard f_7104708180 against invalid container and heap pointers.
+    static totk::recompiler::RecompiledFunc s_orig_7104708180 =
+        totk::recompiler::lookup_recompiled_func(0x7104708180ULL);
+    totk::recompiler::register_recompiled_func(0x7104708180ULL, [](Arm64Context *c) {
+        constexpr uint64_t guest_base = totk::runtime::GUEST_MEMORY_BASE;
+        constexpr uint64_t guest_limit = totk::runtime::GUEST_MEMORY_LIMIT;
+        constexpr uint64_t max_elements = 0x100000;
+        auto &memory = totk::runtime::MemoryManager::instance();
+        auto valid_guest_range = [&memory](uint64_t address, uint64_t size) {
+            return memory.get_guest_base() != nullptr &&
+                   address >= guest_base && address <= guest_limit &&
+                   size <= guest_limit - address &&
+                   memory.commit(address, static_cast<size_t>(size));
+        };
+
+        const bool invalid_container = !valid_guest_range(c->x[0], 0x48);
+        const bool invalid_heap = !valid_guest_range(c->x[2], sizeof(uint64_t));
+        if (invalid_container || invalid_heap || !s_orig_7104708180) {
+            if (invalid_container) {
+                c->x[0] = hlr_bump_alloc(0x50, 0x10);
+            }
+            if (invalid_heap) {
+                c->x[2] = get_default_heap();
+            }
+
+            c->x[1] = std::min(c->x[1], max_elements);
+            const uint64_t safe_buf =
+                hlr_bump_alloc(std::max<uint64_t>(c->x[1], 1) * sizeof(uint64_t), 0x10);
+            *reinterpret_cast<uint64_t *>(c->x[0] + 0x38) = c->x[1];
+            *reinterpret_cast<uint64_t *>(c->x[0] + 0x40) = safe_buf;
+            c->pc = c->x[30];
+            return;
+        }
+
+        s_orig_7104708180(c);
+    });
+
+    // Skip SEAD table setup when its container is null or outside guest memory.
+    static totk::recompiler::RecompiledFunc s_orig_7104707f6c =
+        totk::recompiler::lookup_recompiled_func(0x7104707f6cULL);
+    totk::recompiler::register_recompiled_func(0x7104707f6cULL, [](Arm64Context *c) {
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (c->x[0] == 0 || memory.get_guest_base() == nullptr ||
+            !memory.is_in_guest_range(c->x[0]) ||
+            !memory.commit(c->x[0], sizeof(uint64_t))) {
+            c->pc = c->x[30];
+            return;
+        }
+
+        if (s_orig_7104707f6c) {
+            s_orig_7104707f6c(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_7104708290 =
+        totk::recompiler::lookup_recompiled_func(0x7104708290ULL);
+    totk::recompiler::register_recompiled_func(0x7104708290ULL, [](Arm64Context *c) {
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (c->x[0] == 0 || memory.get_guest_base() == nullptr ||
+            !memory.is_in_guest_range(c->x[0]) ||
+            !memory.commit(c->x[0], sizeof(uint64_t))) {
+            if (c->x[22] == 0) {
+                c->x[22] = get_safe_container_node();
+            }
+            c->pc = c->x[30];
+            return;
+        }
+
+        if (s_orig_7104708290) {
+            s_orig_7104708290(c);
+        } else {
+            c->pc = c->x[30];
+        }
+    });
+
+    // Bypass f_7104cceae8 to avoid dereferencing a null lookup result.
+    totk::recompiler::register_recompiled_func(0x7104cceae8ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
         c->pc = c->x[30];
+    });
+
+    // Bypass f_7104ccdcd4 to avoid dereferencing a null lookup result.
+    totk::recompiler::register_recompiled_func(0x7104ccdcd4ULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_71047083a0 =
+        totk::recompiler::lookup_recompiled_func(0x71047083a0ULL);
+    totk::recompiler::register_recompiled_func(0x71047083a0ULL, [](Arm64Context *c) {
+        auto &memory = totk::runtime::MemoryManager::instance();
+        if (c->x[0] == 0 || memory.get_guest_base() == nullptr ||
+            !memory.is_in_guest_range(c->x[0]) ||
+            !memory.commit(c->x[0], sizeof(uint64_t))) {
+            c->pc = c->x[30];
+            return;
+        }
+
+        if (s_orig_71047083a0) {
+            s_orig_71047083a0(c);
+        } else {
+            c->pc = c->x[30];
+        }
     });
 
     // Guard f_71046f038c (agl layer setup)
@@ -1245,6 +2100,24 @@ void register_sead_hlr_hooks() {
     };
     hook_memset(0x710c5840b0ULL); // sdk memset
     hook_memset(0x7106bb7b80ULL); // main PLT memset
+
+    auto hook_memcpy = [](uint64_t addr) {
+        totk::recompiler::register_recompiled_func(addr, [](Arm64Context *c) {
+            uint64_t dst = c->x[0];
+            uint64_t src = c->x[1];
+            uint64_t n = c->x[2];
+            auto &memory = totk::runtime::MemoryManager::instance();
+            if (n > 0 && is_mapped_guest_range(memory, dst, n) &&
+                is_mapped_guest_range(memory, src, n)) {
+                std::memmove(reinterpret_cast<void *>(dst),
+                             reinterpret_cast<const void *>(src), n);
+            }
+            c->x[0] = dst;
+            c->pc = c->x[30];
+        });
+    };
+    hook_memcpy(0x710c5b23c0ULL); // sdk memcpy
+    hook_memcpy(0x7106bb7bd0ULL); // main PLT memcpy
 
     // Guard f_7104b4f180 (allocator block reset / setup)
     totk::recompiler::register_recompiled_func(0x7104b4f180ULL, [](Arm64Context *c) {
@@ -1356,6 +2229,82 @@ void register_sead_hlr_hooks() {
         c->pc = c->x[30];
     });
 
+    // Bypass SEAD table lookups that can dereference an absent or invalid table.
+    auto bypass_sead_table_lookup = [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
+        return;
+    };
+    totk::recompiler::register_recompiled_func(0x7104ccb13cULL, bypass_sead_table_lookup);
+    totk::recompiler::register_recompiled_func(0x7104ccb2acULL, bypass_sead_table_lookup);
+    totk::recompiler::register_recompiled_func(0x7104ccb43cULL, bypass_sead_table_lookup);
+    totk::recompiler::register_recompiled_func(0x7104ccb600ULL, bypass_sead_table_lookup);
+    totk::recompiler::register_recompiled_func(0x7104ccb844ULL, bypass_sead_table_lookup);
+    totk::recompiler::register_recompiled_func(0x7104ccbaacULL, bypass_sead_table_lookup);
+    totk::recompiler::register_recompiled_func(0x7104ccbd5cULL, bypass_sead_table_lookup);
+
+    // Guard f_7104cca050 (string table lookup)
+    static totk::recompiler::RecompiledFunc s_orig_7104cca050 =
+        totk::recompiler::lookup_recompiled_func(0x7104cca050ULL);
+    totk::recompiler::register_recompiled_func(0x7104cca050ULL, [](Arm64Context *c) {
+        constexpr uint64_t object_size = 0x2bc;
+        constexpr uint64_t table_offset = 0x2b0;
+        constexpr uint32_t max_entries = 128;
+        constexpr uint64_t guest_base = totk::runtime::GUEST_MEMORY_BASE;
+        constexpr uint64_t guest_limit = totk::runtime::GUEST_MEMORY_LIMIT;
+        auto &memory = totk::runtime::MemoryManager::instance();
+
+        auto valid_range = [&memory](uint64_t address, uint64_t size) {
+            return address >= guest_base && address <= guest_limit &&
+                   size <= guest_limit - address &&
+                   memory.commit(address, static_cast<size_t>(size));
+        };
+        auto clear_outputs = [&c, &valid_range]() {
+            for (uint64_t output : {c->x[1], c->x[2]}) {
+                if (output != 0 && valid_range(output, sizeof(uint64_t))) {
+                    *reinterpret_cast<uint64_t *>(output) = 0;
+                }
+            }
+        };
+        auto return_empty = [&c, &clear_outputs]() {
+            clear_outputs();
+            c->pc = c->x[30];
+        };
+
+        const uint64_t object = c->x[0];
+        if (c->x[1] == 0 || c->x[2] == 0 ||
+            !valid_range(c->x[1], sizeof(uint64_t)) ||
+            !valid_range(c->x[2], sizeof(uint64_t)) ||
+            !valid_range(object, object_size)) {
+            return_empty();
+            return;
+        }
+
+        auto *count_ptr = reinterpret_cast<uint32_t *>(object + 0x2b8);
+        *count_ptr = std::min<uint32_t>(*count_ptr, max_entries);
+        const uint32_t count = *count_ptr;
+        const uint64_t table = *reinterpret_cast<uint64_t *>(object + table_offset);
+
+        if (table == 0 ||
+            !valid_range(table, static_cast<uint64_t>(count) * sizeof(uint64_t))) {
+            return_empty();
+            return;
+        }
+        for (uint32_t i = 0; i < count; ++i) {
+            const uint64_t string = *reinterpret_cast<uint64_t *>(table + i * sizeof(uint64_t));
+            if (string == 0 || !valid_range(string, 1)) {
+                return_empty();
+                return;
+            }
+        }
+
+        if (s_orig_7104cca050) {
+            s_orig_7104cca050(c);
+        } else {
+            return_empty();
+        }
+    });
+
     // Guard f_7105128a40 (node lookup in descriptor tree -> safe empty node)
     static totk::recompiler::RecompiledFunc s_orig_7105128a40 =
         totk::recompiler::lookup_recompiled_func(0x7105128a40ULL);
@@ -1402,6 +2351,12 @@ void register_sead_hlr_hooks() {
         } else {
             c->pc = c->x[30];
         }
+    });
+
+    // Guard f_7104a623dc (SEAD resource / event registration)
+    totk::recompiler::register_recompiled_func(0x7104a623dcULL, [](Arm64Context *c) {
+        c->x[0] = 0;
+        c->pc = c->x[30];
     });
 
     // Guard f_7104a24ed4 (heap/allocator property query)
@@ -1572,6 +2527,24 @@ void register_sead_hlr_hooks() {
             *reinterpret_cast<uint8_t *>(c->x[0] + 0x110) = 1;
         }
         c->pc = c->x[30];
+    });
+
+    static totk::recompiler::RecompiledFunc s_orig_7104d0c788 =
+        totk::recompiler::lookup_recompiled_func(0x7104d0c788ULL);
+    totk::recompiler::register_recompiled_func(0x7104d0c788ULL, [](Arm64Context *c) {
+        if (c->x[0] < 0x7000000000ULL || c->x[0] >= 0x7300000000ULL - 0x20) {
+            c->pc = c->x[30];
+            return;
+        }
+        if (c->x[1] < 0x7000000000ULL || c->x[1] >= 0x7300000000ULL - 0x20) {
+            c->x[1] = hlr_bump_alloc(0x100, 0x10);
+        }
+        if (c->x[0] == c->x[1]) {
+            c->pc = c->x[30];
+            return;
+        }
+        if (s_orig_7104d0c788) s_orig_7104d0c788(c);
+        else c->pc = c->x[30];
     });
 
     // Guard nn::util::BinaryFileHeader::GetFirstBlock against invalid object pointers

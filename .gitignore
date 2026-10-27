@@ -13,7 +13,13 @@ __pycache__/
 
 # Local workspace & scratch
 local/
-work/
+work/*
+!work/outbox_prs/
+!work/outbox_prs/**
+!work/pc2_boot_progress.log
+!work/*.md
+!work/*.patch
+!work/*.c
 scratch/
 reference_repos/
 
@@ -36,3 +42,5 @@ reference_repos/
 .idea/
 *.swp
 *.DS_Store
+
+refs/

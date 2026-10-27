@@ -1,0 +1,24 @@
+diff --git a/src/gfx/compat/gfx_compat.h b/src/gfx/compat/gfx_compat.h
+index 04c4c3d..0ceda13 100644
+--- a/src/gfx/compat/gfx_compat.h
++++ b/src/gfx/compat/gfx_compat.h
+@@ -67,7 +67,18 @@ static inline mach_port_t pthread_mach_thread_np(pthread_t t) { (void)t; return
+ static inline kern_return_t mach_port_deallocate(mach_port_t t, mach_port_t p) { (void)t; (void)p; return KERN_SUCCESS; }
+ static inline kern_return_t thread_info(mach_port_t t, int f, thread_info_t i, mach_msg_type_number_t *n) { (void)t; (void)f; (void)i; (void)n; return KERN_FAILURE; }
+ static inline kern_return_t task_info(mach_port_t t, int f, task_info_t i, mach_msg_type_number_t *n) { (void)t; (void)f; (void)i; (void)n; return KERN_FAILURE; }
+-static inline kern_return_t thread_policy_set(mach_port_t t, int f, thread_policy_t p, mach_msg_type_number_t n) { (void)t; (void)f; (void)p; (void)n; return KERN_FAILURE; }
++extern void plat_thread_realtime(uint64_t period_ns);
++static inline kern_return_t thread_policy_set(mach_port_t t, int f, thread_policy_t p, mach_msg_type_number_t n) {
++    (void)t; (void)f; (void)n;
++    if (p) {
++        const thread_time_constraint_policy_data_t *tcp = (const thread_time_constraint_policy_data_t *)p;
++        uint64_t period_ns = tcp->period ? (uint64_t)tcp->period : 16666666ULL;
++        plat_thread_realtime(period_ns);
++    } else {
++        plat_thread_realtime(16666666ULL);
++    }
++    return KERN_SUCCESS;
++}
+ static inline kern_return_t thread_policy_get(mach_port_t t, int f, thread_policy_t p, mach_msg_type_number_t *n, boolean_t *d) { (void)t; (void)f; (void)p; (void)n; (void)d; return KERN_FAILURE; }
+ static inline kern_return_t vm_read_overwrite(mach_port_t t, vm_address_t a, vm_size_t n, vm_address_t d, vm_size_t *got) { (void)t; (void)a; (void)n; (void)d; *got = 0; return KERN_FAILURE; }
+ 

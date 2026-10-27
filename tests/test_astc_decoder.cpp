@@ -113,6 +113,53 @@ void test_astc_image_decompression() {
     std::printf("  -> ASTC Full Image Decompression: PASSED\n");
 }
 
+void test_astc_all_supported_dimensions() {
+    std::printf("[Test] Running test_astc_all_supported_dimensions...\n");
+    const std::pair<uint32_t, uint32_t> all_dims[] = {
+        {4, 4}, {5, 4}, {5, 5}, {6, 5}, {6, 6},
+        {8, 5}, {8, 6}, {8, 8}, {10, 5}, {10, 6},
+        {10, 8}, {10, 10}, {12, 10}, {12, 12}
+    };
+
+    uint8_t block[16];
+    totk::graphics::AstcDecoder::make_void_extent_block(block, 128, 64, 32, 255);
+
+    for (const auto &[bw, bh] : all_dims) {
+        assert(totk::graphics::AstcDecoder::is_block_dim_supported(bw, bh));
+        std::vector<uint8_t> pixels(bw * bh * 4, 0);
+        bool ok = totk::graphics::AstcDecoder::decompress_block(block, bw, bh, pixels.data(), bw * 4);
+        assert(ok);
+        assert(pixels[0] == 128);
+        assert(pixels[1] == 64);
+        assert(pixels[2] == 32);
+        assert(pixels[3] == 255);
+    }
+
+    std::printf("  -> All Switch ASTC Dimensions (4x4 through 12x12): PASSED\n");
+}
+
+void test_astc_srgb_conversion() {
+    std::printf("[Test] Running test_astc_srgb_conversion...\n");
+    uint8_t block[16];
+    // Mid-gray sRGB value ~128
+    totk::graphics::AstcDecoder::make_void_extent_block(block, 128, 128, 128, 255);
+
+    uint8_t linear_pixels[4 * 4 * 4]{};
+    bool ok_lin = totk::graphics::AstcDecoder::decompress_block(block, 4, 4, linear_pixels, 16, false);
+    assert(ok_lin);
+    assert(linear_pixels[0] == 128);
+
+    uint8_t srgb_pixels[4 * 4 * 4]{};
+    bool ok_srgb = totk::graphics::AstcDecoder::decompress_block(block, 4, 4, srgb_pixels, 16, true);
+    assert(ok_srgb);
+    // In linear space, 128 sRGB is ~0.216 linear -> ~55/255
+    assert(srgb_pixels[0] < 70 && srgb_pixels[0] > 40);
+    // Alpha channel is always unmultiplied linear
+    assert(srgb_pixels[3] == 255);
+
+    std::printf("  -> ASTC sRGB-to-Linear Gamma Conversion: PASSED\n");
+}
+
 int main() {
     std::printf("==================================================\n");
     std::printf("  ASTC Texture Decoder Unit Tests\n");
@@ -123,6 +170,8 @@ int main() {
     test_astc_8x8_void_extent();
     test_astc_linear_gradient();
     test_astc_image_decompression();
+    test_astc_all_supported_dimensions();
+    test_astc_srgb_conversion();
 
     std::printf("\nAll ASTC Decoder unit tests PASSED successfully!\n");
     return 0;

@@ -1,0 +1,195 @@
+diff --git a/tools/build_xlate.py b/tools/build_xlate.py
+index 784de4c..d14cc81 100644
+--- a/tools/build_xlate.py
++++ b/tools/build_xlate.py
+@@ -25,19 +25,30 @@ def main():
+     out = ROOT / 'dev-local/build/shaders'   # a development tool's build: no game data, not in git
+     env = dict(os.environ, NUGET_PACKAGES=str(ROOT / 'dev-local/nuget'), DOTNET_CLI_HOME=str(ROOT / 'dev-local/dotnet-home'),
+                DOTNET_CLI_TELEMETRY_OPTOUT='1', DOTNET_NOLOGO='1', DOTNET_SKIP_FIRST_TIME_EXPERIENCE='1')
+-    proj = ROOT / 'third_party/shader_translator/ultrs-shaders.csproj'
+-    rc = subprocess.run([a.dotnet, 'publish', str(proj), '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
+-                         '-p:PublishSingleFile=true', '-p:InvariantGlobalization=true',
+-                         '-p:IncludeNativeLibrariesForSelfExtract=true',
+-                         f'-p:RyuSrc={ROOT / "third_party/maxwell_shader"}',
+-                         '-o', str(out), '-nologo', '-v:q', '-maxcpucount:4'], env=env).returncode
++    proj = ROOT / "third_party/shader_translator/ultrs-shaders.csproj"
++    if sys.platform.startswith("linux"):
++        rid = "linux-x64"
++    elif sys.platform == "darwin":
++        rid = "osx-arm64" if "arm" in os.uname().machine else "osx-x64"
++    else:
++        rid = "win-x64"
++    rc = subprocess.run([a.dotnet, "publish", str(proj), "-c", "Release", "-r", rid, "--self-contained", "true",
++                         "-p:PublishSingleFile=true", "-p:InvariantGlobalization=true",
++                         "-p:IncludeNativeLibrariesForSelfExtract=true",
++                         f"-p:RyuSrc={ROOT / 'third_party/maxwell_shader'}",
++                         "-o", str(out), "-nologo", "-v:q", "-maxcpucount:4"], env=env).returncode
+     if rc:
+         sys.exit(rc)
+-    exe = out / 'ultrs-shaders.exe'
++    exe_name = "ultrs-shaders" if not rid.startswith("win") else "ultrs-shaders.exe"
++    exe = out / exe_name
+     for f in out.iterdir():   # one program; the debug symbols are not needed
+-        if f.suffix == '.pdb':
++        if f.suffix == ".pdb":
+             f.unlink()
+-    print(f'built {exe} ({exe.stat().st_size / 1e6:.0f} MB)')
++    if exe.is_file():
++        exe.chmod(0o755)
++        print(f"built {exe} ({exe.stat().st_size / 1e6:.0f} MB)")
++    else:
++        print(f"built in {out}")
+ 
+ 
+ if __name__ == '__main__':
+diff --git a/tools/compare_spirv_opt.py b/tools/compare_spirv_opt.py
+index 5ca080d..c846d6f 100644
+--- a/tools/compare_spirv_opt.py
++++ b/tools/compare_spirv_opt.py
+@@ -39,10 +39,14 @@ def main():
+             for name in ('ryujinx', 'eden'):
+                 src = a.dir / name / f'{key}.spv'
+                 dst = tmp / f'{name}-{key}.spv'
+-                p = subprocess.Popen([OPT, '-O', '--target-env=vulkan1.3', '--scalar-block-layout', str(src), '-o', str(dst)],
+-                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x4 | 0x4000)
+-                ctypes.windll.kernel32.SetProcessAffinityMask(int(p._handle), ctypes.c_size_t(0xFF))
+-                ctypes.windll.ntdll.NtResumeProcess(int(p._handle))
++                if sys.platform == "win32":
++                    p = subprocess.Popen([OPT, "-O", "--target-env=vulkan1.3", "--scalar-block-layout", str(src), "-o", str(dst)],
++                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x4 | 0x4000)
++                    ctypes.windll.kernel32.SetProcessAffinityMask(int(p._handle), ctypes.c_size_t(0xFF))
++                    ctypes.windll.ntdll.NtResumeProcess(int(p._handle))
++                else:
++                    p = subprocess.Popen([OPT, "-O", "--target-env=vulkan1.3", "--scalar-block-layout", str(src), "-o", str(dst)],
++                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                 if p.wait() or not dst.exists():
+                     with lock: failed[name] += 1
+                     continue
+diff --git a/tools/run_eden_xlate.py b/tools/run_eden_xlate.py
+index 76e22b2..03b790f 100644
+--- a/tools/run_eden_xlate.py
++++ b/tools/run_eden_xlate.py
+@@ -26,10 +26,14 @@ def main():
+     t0 = time.time()
+     procs = []
+     for s in (range(1) if a.only else range(shards)):
+-        p = subprocess.Popen([str(exe), str(a.dir / 'shaders.tsv'), str(a.dir / 'raw'), str(a.dir / 'eden'), str(s), str(shards)],
+-                             env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, creationflags=0x4 | 0x4000)
+-        ctypes.windll.kernel32.SetProcessAffinityMask(int(p._handle), ctypes.c_size_t(0xFF))
+-        ctypes.windll.ntdll.NtResumeProcess(int(p._handle))
++        if sys.platform == "win32":
++            p = subprocess.Popen([str(exe), str(a.dir / "shaders.tsv"), str(a.dir / "raw"), str(a.dir / "eden"), str(s), str(shards)],
++                                 env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, creationflags=0x4 | 0x4000)
++            ctypes.windll.kernel32.SetProcessAffinityMask(int(p._handle), ctypes.c_size_t(0xFF))
++            ctypes.windll.ntdll.NtResumeProcess(int(p._handle))
++        else:
++            p = subprocess.Popen([str(exe), str(a.dir / "shaders.tsv"), str(a.dir / "raw"), str(a.dir / "eden"), str(s), str(shards)],
++                                 env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+         procs.append(p)
+     rows = []
+     for p in procs:
+diff --git a/tools/run_limited.py b/tools/run_limited.py
+index 6b40575..632ef76 100644
+--- a/tools/run_limited.py
++++ b/tools/run_limited.py
+@@ -17,13 +17,24 @@ def main():
+         cpus, args = int(args[1]), args[2:]
+     if args[:1] == ['--']:
+         args = args[1:]
+-    env = dict(os.environ, PATH=r'C:\msys64\clang64\bin' + os.pathsep + os.environ['PATH'])
+-    p = subprocess.Popen(args, env=env, creationflags=0x4 | 0x4000)   # CREATE_SUSPENDED | BELOW_NORMAL_PRIORITY_CLASS
+-    if not ctypes.windll.kernel32.SetProcessAffinityMask(int(p._handle), ctypes.c_size_t((1 << cpus) - 1)):
+-        p.kill()
+-        sys.exit('SetProcessAffinityMask failed')
+-    ctypes.windll.ntdll.NtResumeProcess(int(p._handle))
+-    sys.exit(p.wait())
++    if sys.platform == "win32":
++        env = dict(os.environ, PATH=r"C:\msys64\clang64\bin" + os.pathsep + os.environ.get("PATH", ""))
++        p = subprocess.Popen(args, env=env, creationflags=0x4 | 0x4000)   # CREATE_SUSPENDED | BELOW_NORMAL_PRIORITY_CLASS
++        if not ctypes.windll.kernel32.SetProcessAffinityMask(int(p._handle), ctypes.c_size_t((1 << cpus) - 1)):
++            p.kill()
++            sys.exit("SetProcessAffinityMask failed")
++        ctypes.windll.ntdll.NtResumeProcess(int(p._handle))
++        sys.exit(p.wait())
++    else:
++        def preexec():
++            try:
++                os.nice(10)
++                if hasattr(os, "sched_setaffinity"):
++                    os.sched_setaffinity(0, set(range(cpus)))
++            except Exception:
++                pass
++        p = subprocess.Popen(args, preexec_fn=preexec)
++        sys.exit(p.wait())
+ 
+ 
+ if __name__ == '__main__':
+diff --git a/tools/run_ryujinx_xlate.py b/tools/run_ryujinx_xlate.py
+index 199e107..af431ca 100644
+--- a/tools/run_ryujinx_xlate.py
++++ b/tools/run_ryujinx_xlate.py
+@@ -19,12 +19,24 @@ from toolchain import XLATE  # noqa: E402
+ 
+ 
+ def start_pinned(cmd, mask, env):
+-    CREATE_SUSPENDED, BELOW_NORMAL = 0x4, 0x4000
+-    p = subprocess.Popen(cmd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+-                         text=True, creationflags=CREATE_SUSPENDED | BELOW_NORMAL)
+-    ctypes.windll.kernel32.SetProcessAffinityMask(int(p._handle), ctypes.c_size_t(mask))
+-    ctypes.windll.ntdll.NtResumeProcess(int(p._handle))
+-    return p
++    if sys.platform == "win32":
++        CREATE_SUSPENDED, BELOW_NORMAL = 0x4, 0x4000
++        p = subprocess.Popen(cmd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
++                             text=True, creationflags=CREATE_SUSPENDED | BELOW_NORMAL)
++        ctypes.windll.kernel32.SetProcessAffinityMask(int(p._handle), ctypes.c_size_t(mask))
++        ctypes.windll.ntdll.NtResumeProcess(int(p._handle))
++        return p
++    def preexec():
++        try:
++            os.nice(10)
++            if hasattr(os, "sched_setaffinity"):
++                cpus = {i for i in range(64) if (mask & (1 << i))}
++                if cpus:
++                    os.sched_setaffinity(0, cpus)
++        except Exception:
++            pass
++    return subprocess.Popen(cmd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
++                            text=True, preexec_fn=preexec)
+ 
+ 
+ def main():
+@@ -40,8 +52,9 @@ def main():
+     (a.dir / 'ryujinx').mkdir(exist_ok=True)
+     env = dict(os.environ, DOTNET_CLI_TELEMETRY_OPTOUT='1', DOTNET_NOLOGO='1',
+                DOTNET_CLI_HOME=str(ROOT / 'third_party/dotnet-home'))
++    xlate_name = "ultrs-shaders" if sys.platform.startswith("linux") else "ultrs-shaders.exe"
+     if XLATE is None:
+-        sys.exit('the shader translator ultrs-shaders.exe is missing: python tools/build_xlate.py')
++        sys.exit(f"the shader translator {xlate_name} is missing: python tools/build_xlate.py")
+     cmd = [str(XLATE)]   # tools/build_xlate.py, or the builder package's deps/shaders
+     results, lock = [], threading.Lock()
+     shards = [lines[i::a.workers] for i in range(a.workers)]
+diff --git a/tools/validate_spirv.py b/tools/validate_spirv.py
+index 3e4c643..ca9e1b6 100644
+--- a/tools/validate_spirv.py
++++ b/tools/validate_spirv.py
+@@ -19,10 +19,14 @@ def main():
+ 
+     def worker(chunk):
+         for f in chunk:
+-            p = subprocess.Popen([SPIRV_VAL, '--target-env', 'vulkan1.3', '--scalar-block-layout', str(f)], stdout=subprocess.PIPE,
+-                                 stderr=subprocess.STDOUT, text=True, creationflags=0x4 | 0x4000)
+-            ctypes.windll.kernel32.SetProcessAffinityMask(int(p._handle), ctypes.c_size_t(0xFF))
+-            ctypes.windll.ntdll.NtResumeProcess(int(p._handle))
++            if sys.platform == "win32":
++                p = subprocess.Popen([SPIRV_VAL, "--target-env", "vulkan1.3", "--scalar-block-layout", str(f)], stdout=subprocess.PIPE,
++                                     stderr=subprocess.STDOUT, text=True, creationflags=0x4 | 0x4000)
++                ctypes.windll.kernel32.SetProcessAffinityMask(int(p._handle), ctypes.c_size_t(0xFF))
++                ctypes.windll.ntdll.NtResumeProcess(int(p._handle))
++            else:
++                p = subprocess.Popen([SPIRV_VAL, "--target-env", "vulkan1.3", "--scalar-block-layout", str(f)], stdout=subprocess.PIPE,
++                                     stderr=subprocess.STDOUT, text=True)
+             out, _ = p.communicate()
+             first = next((l for l in out.splitlines() if l.strip()), '')
+             with lock:

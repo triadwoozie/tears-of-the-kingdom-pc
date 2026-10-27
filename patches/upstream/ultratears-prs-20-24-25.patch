@@ -1,0 +1,4173 @@
+diff --git a/src/gfx/vkb_shader.c b/src/gfx/vkb_shader.c
+index 58b2c7c..981c395 100644
+--- a/src/gfx/vkb_shader.c
++++ b/src/gfx/vkb_shader.c
+@@ -13,6 +13,11 @@
+ #ifdef _WIN32
+ #include <windows.h>
+ #include <bcrypt.h>   // after windows.h (its types)
++#else
++#include <errno.h>
++#include <fcntl.h>
++#include <sys/types.h>
++#include <unistd.h>
+ #endif
+ #include <stdatomic.h>
+ #include <stdio.h>
+@@ -244,6 +249,118 @@ static const char *cache_dir(void) {
+     return d;
+ }
+ 
++// ---------------- the shader pack (<cache>/shaders.pack, tools/pack_shaders.py) ----------------
++// One file instead of a .spv and a .res.json per shader (~57,000 files: slow to copy, back up and sync). Layout,
++// little-endian: "UTSHPK01", u32 count, u32 0, then count entries sorted by key {u8 key[32] (the SHA-256); u64 offset;
++// u32 SPIR-V bytes; u32 reflection bytes} (the SPIR-V at offset, its reflection right after it), then the data.
++// Without a pack, or for a key not in it, the loose files are read as before.
++typedef struct { uint8_t key[32]; uint64_t off; uint32_t nspv, njson; } pack_entry;
++_Static_assert(sizeof(pack_entry) == 48, "shader pack entry layout");
++#ifdef _WIN32
++static HANDLE g_pack = INVALID_HANDLE_VALUE;
++#else
++static int g_pack = -1;
++#endif
++static pack_entry *g_pack_ix;
++static uint32_t g_pack_n;
++static int read_at(
++#ifdef _WIN32
++    HANDLE h,
++#else
++    int h,
++#endif
++    uint64_t off, void *buf, uint32_t n) {
++#ifdef _WIN32
++    OVERLAPPED o = {0};
++    o.Offset = (DWORD)off;
++    o.OffsetHigh = (DWORD)(off >> 32);
++    DWORD got = 0;
++    return ReadFile(h, buf, n, &got, &o) && got == n;
++#else
++    uint8_t *p = buf;
++    size_t left = n;
++    while (left) {
++        ssize_t got = pread(h, p, left, (off_t)off);
++        if (got < 0 && errno == EINTR) continue;
++        if (got <= 0) return 0;
++        p += got;
++        off += (uint64_t)got;
++        left -= (size_t)got;
++    }
++    return 1;
++#endif
++}
++static void pack_open(void) {
++    char path[1024];
++    snprintf(path, sizeof path, "%s/shaders.pack", cache_dir());
++#ifdef _WIN32
++    HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
++    if (h == INVALID_HANDLE_VALUE) return;
++#else
++    int h = open(path, O_RDONLY | O_CLOEXEC);
++    if (h < 0) return;
++#endif
++    uint8_t hd[16];
++    uint32_t n = 0;
++    if (read_at(h, 0, hd, sizeof hd) && !memcmp(hd, "UTSHPK01", 8)) memcpy(&n, hd + 8, 4);
++    pack_entry *ix = n && n < (1u << 24) ? malloc((size_t)n * sizeof *ix) : NULL;
++    if (!ix || !read_at(h, sizeof hd, ix, n * (uint32_t)sizeof *ix)) {
++        VLOG("%s: not a shader pack, the loose files are used", path);
++        free(ix);
++#ifdef _WIN32
++        CloseHandle(h);
++#else
++        close(h);
++#endif
++        return;
++    }
++    g_pack = h;
++    g_pack_ix = ix;
++    g_pack_n = n;
++    VLOG("shader pack: %u shaders in %s", n, path);
++}
++static int hexval(char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1; }
++static int pack_read(const char *key, char **json, uint32_t **spv, size_t *nspv) {
++    uint8_t k[32];
++    for (int i = 0; i < 32; i++) {
++        int hi = hexval(key[2 * i]), lo = hi < 0 ? -1 : hexval(key[2 * i + 1]);
++        if (lo < 0) return 0;
++        k[i] = (uint8_t)(hi << 4 | lo);
++    }
++    size_t lo = 0, hi = g_pack_n;
++    while (lo < hi) {
++        size_t mid = lo + (hi - lo) / 2;
++        int c = memcmp(g_pack_ix[mid].key, k, 32);
++        if (c < 0) { lo = mid + 1; continue; }
++        if (c > 0) { hi = mid; continue; }
++        const pack_entry *e = &g_pack_ix[mid];
++        char *s = malloc((size_t)e->nspv + 1), *j = malloc((size_t)e->njson + 1);
++        if (!s || !j || !read_at(g_pack, e->off, s, e->nspv) || !read_at(g_pack, e->off + e->nspv, j, e->njson)) {
++            free(s);
++            free(j);
++            return 0;
++        }
++        s[e->nspv] = 0;
++        j[e->njson] = 0;
++        *spv = (uint32_t *)s;
++        *json = j;
++        *nspv = e->nspv;
++        return 1;
++    }
++    return 0;
++}
++// A shader's translation (SPIR-V) and reflection (JSON), malloc'd and NUL-terminated: from the pack, else the loose files.
++static void read_translation(const char *key, char **json, uint32_t **spv, size_t *nspv) {
++    static pthread_once_t once = PTHREAD_ONCE_INIT;
++    pthread_once(&once, pack_open);
++    if (g_pack_n && strlen(key) >= 64 && pack_read(key, json, spv, nspv)) return;
++    char path[1024];
++    snprintf(path, sizeof path, "%s/%s.res.json", cache_dir(), key);
++    *json = read_file(path, NULL);
++    snprintf(path, sizeof path, "%s/%s.spv", cache_dir(), key);
++    *spv = (uint32_t *)read_file(path, nspv);
++}
++
+ // The translator declares gl_PerVertex with ClipDistance[8] and CullDistance[1]: 9 > maxCombinedClipAndCullDistances (8)
+ // on NVIDIA, though no shader writes the cull distance. The CullDistance member (the block's last) is dropped: its
+ // OpTypeStruct operand, OpMemberName and OpMemberDecorate. Returns the new word count.
+@@ -323,12 +440,10 @@ VkShaderEXT vkb_shader_variant(const vkb_shader *cs, uint32_t intmask, uint32_t
+ 
+ // Reads the reflection, rewrites the SPIR-V bindings into the universal layout, creates the shader object.
+ static int load(vkb_shader *s, const char *key, int nvn_stage) {
+-    char path[1024];
+-    snprintf(path, sizeof path, "%s/%s.res.json", cache_dir(), key);
+-    char *j = read_file(path, NULL);
+-    snprintf(path, sizeof path, "%s/%s.spv", cache_dir(), key);
++    char *j = NULL;
++    uint32_t *spv = NULL;
+     size_t nspv = 0;
+-    uint32_t *spv = (uint32_t *)read_file(path, &nspv);
++    read_translation(key, &j, &spv, &nspv);
+     if (!j || !spv || nspv < 20 || (nspv & 3) || spv[0] != 0x07230203) { free(j); free(spv); return 0; }
+     s->stage = nvn_stage;
+     uint32_t base = nvn_stage == 1 ? VKB_STAGE_BINDINGS : 0;
+diff --git a/src/host/camera_v143.c b/src/host/camera_v143.c
+new file mode 100644
+index 0000000..74101ec
+--- /dev/null
++++ b/src/host/camera_v143.c
+@@ -0,0 +1,834 @@
++#include "camera_v143.h"
++#include "../runtime/cpu.h"
++#include <math.h>
++#include <stdatomic.h>
++#include <stdio.h>
++#include <string.h>
++
++#ifndef M_PI
++#define M_PI 3.14159265358979323846
++#endif
++
++#define RAD_TO_DEG (180.0 / M_PI)
++#define DEG_TO_RAD (M_PI / 180.0)
++
++/* Adapter state for the active logical camera tick */
++typedef struct {
++    uint64_t p_cam;
++    uint64_t p_ctrl;
++    uint64_t cam_mode;
++    uint64_t calc_fn_addr;
++    uint32_t switcher_mode;
++    bool     stick_blocked_by_ui_or_manip;
++    bool     direct_active;
++    bool     applied_this_tick;
++    uint64_t next_tick_id;
++    uint64_t tick_id;
++    uint64_t last_tick_ns;
++    bool     has_test_time;
++    uint64_t test_now_ns;
++    bool     is_alt_5c1_branch;
++    uint64_t normal_branch_ticks;
++    uint64_t alt_branch_ticks;
++    bool     logged_first_tick;
++    bool     logged_first_alt_tick;
++    bool     logged_first_motion;
++    float    yaw_delta_deg;
++    float    pitch_delta_deg;
++    LookCommand cmd;
++} TotkCameraV143State;
++
++static TotkCameraV143State g_cam_state;
++static uint64_t g_logged_unclassified[16];
++static unsigned g_logged_unclassified_count;
++
++static inline float read_f32(uint64_t ea) {
++    uint32_t raw = LD32(ea);
++    float val;
++    memcpy(&val, &raw, sizeof(val));
++    return val;
++}
++
++static inline void write_f32(uint64_t ea, float val) {
++    uint32_t raw;
++    memcpy(&raw, &val, sizeof(raw));
++    ST32(ea, raw);
++}
++
++static inline float get_vf32(const Cpu *c, int reg) {
++    uint32_t raw = (uint32_t)c->v[reg];
++    float val;
++    memcpy(&val, &raw, sizeof(val));
++    return val;
++}
++
++static inline void set_vf32(Cpu *c, int reg, float val) {
++    uint32_t raw;
++    memcpy(&raw, &val, sizeof(raw));
++    c->v[reg] = (uint64_t)raw;
++}
++
++static inline float wrap_deg_180(float deg) {
++    if (!isfinite(deg)) return 0.0f;
++    deg = fmodf(deg + 180.0f, 360.0f);
++    if (deg < 0.0f) deg += 360.0f;
++    return deg - 180.0f;
++}
++
++static inline float clamp_f32(float val, float lo, float hi) {
++    if (!isfinite(val)) return 0.0f;
++    if (lo > hi) {
++        float tmp = lo;
++        lo = hi;
++        hi = tmp;
++    }
++    if (val < lo) return lo;
++    if (val > hi) return hi;
++    return val;
++}
++
++static inline void mark_applied_current_tick(void) {
++    if (!g_cam_state.applied_this_tick) {
++        g_cam_state.applied_this_tick = true;
++        mouse_camera_mark_applied(g_cam_state.tick_id, g_cam_state.cam_mode);
++        if (!g_cam_state.has_test_time && !g_cam_state.logged_first_motion &&
++            (fabsf(g_cam_state.yaw_delta_deg) > 1e-5f || fabsf(g_cam_state.pitch_delta_deg) > 1e-5f)) {
++            g_cam_state.logged_first_motion = true;
++            fprintf(stderr,
++                    "[totk-camera-v143] first mouse rotation applied: calc=%#llx branch=%s dyaw=%.3f deg dpitch=%.3f deg (normal_ticks=%llu alt_ticks=%llu)\n",
++                    (unsigned long long)g_cam_state.calc_fn_addr,
++                    g_cam_state.is_alt_5c1_branch ? "alt_5c1" : "normal",
++                    (double)g_cam_state.yaw_delta_deg,
++                    (double)g_cam_state.pitch_delta_deg,
++                    (unsigned long long)g_cam_state.normal_branch_ticks,
++                    (unsigned long long)g_cam_state.alt_branch_ticks);
++        }
++    }
++}
++
++static bool is_known_cutscene_or_disabled_calc(uint64_t calc_fn_addr) {
++    switch (calc_fn_addr) {
++        case 0x8023c4704ull: /* ExecutePlayerCameraEvent */
++        case 0x8023c4968ull: /* ExecutePlayerCameraEventRail */
++        case 0x8023c531cull: /* ExecutePlayerCameraEventSimple */
++        case 0x8023c64f4ull: /* ExecutePlayerCameraEventTalk */
++        case 0x8023c7de0ull: /* ExecutePlayerCameraEventTurn */
++        case 0x8023c89f0ull: /* ExecutePlayerCameraEventWatch */
++        case 0x8023c8ffcull: /* ExecutePlayerCameraGimmick */
++        case 0x8023c9dd4ull: /* ExecutePlayerCameraEventTalkManualCtrlRet */
++        case 0x8023cdbc8ull: /* ExecutePlayerCameraInitialize */
++        case 0x8023cdb18ull: /* ExecutePlayerCameraKeep */
++        case 0x8023c222cull: /* ExecutePlayerCameraBase (null/base stub) */
++            return true;
++        default:
++            return false;
++    }
++}
++
++static void log_unclassified_once(uint64_t calc_fn_addr) {
++    for (unsigned i = 0; i < g_logged_unclassified_count; i++) {
++        if (g_logged_unclassified[i] == calc_fn_addr) return;
++    }
++    if (g_logged_unclassified_count < 16) {
++        g_logged_unclassified[g_logged_unclassified_count++] = calc_fn_addr;
++        fprintf(stderr, "[totk-camera-v143] Unclassified camera mode calc=%#llx (switcher=%u); preserving native behavior\n",
++                (unsigned long long)calc_fn_addr, g_cam_state.switcher_mode);
++    }
++}
++
++void totk_camera_v143_reset_state(void) {
++    memset(&g_cam_state, 0, sizeof(g_cam_state));
++    memset(g_logged_unclassified, 0, sizeof(g_logged_unclassified));
++    g_logged_unclassified_count = 0;
++}
++
++void totk_camera_v143_set_test_time_ns(uint64_t now_ns) {
++    if (g_cam_state.has_test_time && g_cam_state.last_tick_ns == 0) {
++        g_cam_state.last_tick_ns = g_cam_state.test_now_ns;
++    }
++    g_cam_state.has_test_time = true;
++    g_cam_state.test_now_ns = now_ns;
++}
++
++void totk_camera_v143_get_branch_counts(uint64_t *out_normal, uint64_t *out_alt) {
++    if (out_normal) *out_normal = g_cam_state.normal_branch_ticks;
++    if (out_alt) *out_alt = g_cam_state.alt_branch_ticks;
++}
++
++CameraContext totk_camera_v143_classify_context(uint64_t calc_fn_addr,
++                                                bool stick_blocked_by_ui_or_manip,
++                                                bool *out_menu_wheel,
++                                                bool *out_lock_on,
++                                                bool *out_ultrahand_manip,
++                                                bool *out_vehicle_manual_ok) {
++    if (out_menu_wheel) *out_menu_wheel = false;
++    if (out_lock_on) *out_lock_on = false;
++    if (out_ultrahand_manip) *out_ultrahand_manip = false;
++    if (out_vehicle_manual_ok) *out_vehicle_manual_ok = false;
++
++    if (stick_blocked_by_ui_or_manip) {
++        if (calc_fn_addr == TOTK_V143_CALC_SPECIAL_POWER ||
++            calc_fn_addr == TOTK_V143_CALC_ULTRAHAND) {
++            if (out_ultrahand_manip) *out_ultrahand_manip = true;
++            return CAMERA_CTX_ULTRAHAND_OBJECT;
++        }
++        if (out_menu_wheel) *out_menu_wheel = true;
++        return CAMERA_CTX_MENU_WHEEL;
++    }
++
++    switch (calc_fn_addr) {
++        case TOTK_V143_CALC_CHASE:
++        case TOTK_V143_CALC_TAIL:
++        case TOTK_V143_CALC_CLIMB_OBJ:
++        case TOTK_V143_CALC_WATERFALL_CLIMB:
++        case TOTK_V143_CALC_SHIELD_SURFING:
++        case TOTK_V143_CALC_WAKEBOARD:
++        case TOTK_V143_CALC_ABYSS:
++            return CAMERA_CTX_FREE_ROAM;
++
++        case TOTK_V143_CALC_SPECIAL_POWER:
++            return CAMERA_CTX_ULTRAHAND_LOOK;
++
++        case TOTK_V143_CALC_AIMING:
++            return CAMERA_CTX_AIM;
++
++        case TOTK_V143_CALC_AIMING_TELESCOPE:
++        case TOTK_V143_CALC_CAMERA_FINDER:
++            return CAMERA_CTX_SCOPE;
++
++        case TOTK_V143_CALC_LOCKON_TARGET:
++        case TOTK_V143_CALC_LOCKON_AIMING_AT:
++            if (out_lock_on) *out_lock_on = true;
++            return CAMERA_CTX_LOCK_ON;
++
++        case TOTK_V143_CALC_ULTRAHAND:
++            if (out_ultrahand_manip) *out_ultrahand_manip = true;
++            return CAMERA_CTX_ULTRAHAND_OBJECT;
++
++        case TOTK_V143_CALC_HORSE:
++            if (out_vehicle_manual_ok) *out_vehicle_manual_ok = true;
++            return CAMERA_CTX_VEHICLE;
++
++        case TOTK_V143_CALC_HORSE_REVOLVE:
++        case TOTK_V143_CALC_HORSE_LOCKON_EMPTY:
++            if (out_vehicle_manual_ok) *out_vehicle_manual_ok = false;
++            return CAMERA_CTX_VEHICLE;
++
++        default:
++            if (is_known_cutscene_or_disabled_calc(calc_fn_addr)) {
++                return CAMERA_CTX_DISABLED;
++            }
++            log_unclassified_once(calc_fn_addr);
++            return CAMERA_CTX_UNCLASSIFIED;
++    }
++}
++
++int totk_camera_v143_suppress_gyro(void) {
++    MouseCameraConfig cfg;
++    mouse_camera_get_config(&cfg);
++    if (cfg.backend != MOUSE_BACKEND_NATIVE) return 0;
++    return mouse_camera_should_suppress_gyro() ? 1 : 0;
++}
++
++/* Hook at 0x800874d80 (str w8, [x20, #0x418] inside f_800874c1c):
++ * Live registers:
++ *   x20 = p_ctrl (PlayerCameraController* = p_cam + 0x490)
++ *   x19 = pad_input_ptr
++ *   x21 = (p_cam->flags_34 >> 4) & 7 (bit 0 = right-stick camera look blocked)
++ *   x8  = stick_flags
++ */
++void totk_camera_v143_on_read_stick(struct Cpu *c) {
++    uint64_t p_ctrl = c->x[20];
++    uint32_t cam_input_flags = (uint32_t)c->x[21];
++    bool stick_blocked = ((cam_input_flags & 1u) != 0);
++
++    g_cam_state.p_ctrl = p_ctrl;
++    g_cam_state.stick_blocked_by_ui_or_manip = stick_blocked;
++
++    uint64_t now_ns = g_cam_state.has_test_time ? g_cam_state.test_now_ns : mouse_camera_now_ns();
++    mouse_camera_advance_time(now_ns);
++
++    MouseCameraConfig cfg;
++    MouseCameraDiag diag;
++    mouse_camera_get_config(&cfg);
++    mouse_camera_get_diag(&diag);
++
++    if (cfg.mouse_mode != 0 &&
++        cfg.backend == MOUSE_BACKEND_NATIVE &&
++        diag.captured &&
++        diag.owner == LOOK_OWNER_MOUSE &&
++        !stick_blocked) {
++        /* Zero processed right stick on p_ctrl so stick curve/acceleration never adds to camera */
++        ST64(p_ctrl + 0x420ull, 0ull);
++        /* Clear bit 3 (0x08) and bit 5 (0x20) ("right stick neutral") so Tail/Horse stay in
++         * manual-look sub_state (sub_state=4 / sub_state=2), preventing auto-centering and
++         * slope pitch pull while mouse owns look. */
++        c->x[8] = (uint32_t)((uint32_t)c->x[8] & ~0x28u);
++    }
++
++    ST32(p_ctrl + 0x418ull, (uint32_t)c->x[8]);
++}
++
++/* Hook at 0x800d85e70 (str w9, [x19, #0x24] inside ExecutePlayerCameraSwitcher::execute):
++ * Live registers:
++ *   x19 = switcher
++ *   x20 = p_cam
++ *   x9  = mode_enum
++ */
++void totk_camera_v143_on_switcher_mode(struct Cpu *c) {
++    uint64_t switcher = c->x[19];
++    uint32_t mode_enum = (uint32_t)c->x[9];
++    ST32(switcher + 0x24ull, mode_enum);
++    g_cam_state.p_cam = c->x[20];
++    g_cam_state.switcher_mode = mode_enum;
++}
++
++/* Hook at 0x8002e2340 and 0x8002e2430 (ldr x8, [x8, #0x120] inside ExecutePlayerCameraBase::execute):
++ * Live registers:
++ *   x19 = cam_mode (ExecutePlayerCamera* instance)
++ *   x22 = p_ctrl   (p_cam + 0x490)
++ *   x8  = vtable   (LD64(x8 + 0x120) is mode's calc function address)
++ */
++void totk_camera_v143_on_mode_pre_calc(struct Cpu *c) {
++    uint64_t vtable = c->x[8];
++    uint64_t calc_fn_addr = LD64(vtable + 0x120ull);
++    c->x[8] = calc_fn_addr;
++
++    uint64_t cam_mode = c->x[19];
++    uint64_t p_ctrl = c->x[22];
++    bool is_alt_branch = ((LD8(p_ctrl + 0x5c1ull) >> 2) & 1u) != 0;
++    g_cam_state.cam_mode = cam_mode;
++    g_cam_state.p_ctrl = p_ctrl;
++    g_cam_state.calc_fn_addr = calc_fn_addr;
++    g_cam_state.applied_this_tick = false;
++    g_cam_state.is_alt_5c1_branch = is_alt_branch;
++    if (is_alt_branch) {
++        g_cam_state.alt_branch_ticks++;
++    } else {
++        g_cam_state.normal_branch_ticks++;
++    }
++
++    bool menu_wheel = false;
++    bool lock_on = false;
++    bool ultrahand_manip = false;
++    bool vehicle_manual_ok = false;
++    CameraContext ctx = totk_camera_v143_classify_context(
++        calc_fn_addr,
++        g_cam_state.stick_blocked_by_ui_or_manip,
++        &menu_wheel,
++        &lock_on,
++        &ultrahand_manip,
++        &vehicle_manual_ok);
++
++    float base_fov = read_f32(p_ctrl + 0x35cull);
++    float offset_fov = read_f32(p_ctrl + 0x61cull);
++    float current_vfov_deg = base_fov + offset_fov;
++    if (!isfinite(current_vfov_deg) || current_vfov_deg < 5.0f || current_vfov_deg > 150.0f) {
++        current_vfov_deg = 50.0f;
++    }
++
++    bool allow_manual_look = true;
++    if (ctx == CAMERA_CTX_VEHICLE) {
++        allow_manual_look = vehicle_manual_ok;
++    } else if (ctx == CAMERA_CTX_DISABLED) {
++        allow_manual_look = false;
++    }
++
++    uint64_t now_ns = g_cam_state.has_test_time ? g_cam_state.test_now_ns : mouse_camera_now_ns();
++    double dt_sec = 1.0 / 60.0;
++    if (g_cam_state.last_tick_ns != 0 && now_ns > g_cam_state.last_tick_ns) {
++        double raw_dt = (double)(now_ns - g_cam_state.last_tick_ns) * 1e-9;
++        if (raw_dt < 0.0005) raw_dt = 0.0005;
++        if (raw_dt > 0.25) raw_dt = 0.25;
++        dt_sec = raw_dt;
++    }
++    g_cam_state.last_tick_ns = now_ns;
++
++    CameraFrame frame;
++    memset(&frame, 0, sizeof(frame));
++    frame.tick_id = ++g_cam_state.next_tick_id;
++    frame.camera_generation = cam_mode;
++    frame.context = ctx;
++    frame.now_ns = now_ns;
++    frame.dt_sec = dt_sec;
++    frame.allow_manual_look = allow_manual_look;
++    frame.current_yaw_rad = 0.0f;
++    frame.current_pitch_rad = 0.0f;
++    frame.pitch_min_rad = -(float)(85.0 * DEG_TO_RAD);
++    frame.pitch_max_rad = (float)(85.0 * DEG_TO_RAD);
++    frame.current_vfov_rad = (float)(current_vfov_deg * DEG_TO_RAD);
++    frame.neutral_vfov_rad = (float)(50.0 * DEG_TO_RAD);
++
++    mouse_camera_begin_tick(&frame, &g_cam_state.cmd);
++    g_cam_state.tick_id = g_cam_state.cmd.tick_id;
++
++    if (!g_cam_state.has_test_time) {
++        if (!g_cam_state.logged_first_tick) {
++            g_cam_state.logged_first_tick = true;
++            MouseCameraDiag diag;
++            mouse_camera_get_diag(&diag);
++            fprintf(stderr,
++                    "[totk-camera-v143] first camera tick: calc=%#llx ctx=%d branch=%s captured=%d owner=%d route=%d\n",
++                    (unsigned long long)calc_fn_addr,
++                    (int)ctx,
++                    is_alt_branch ? "alt_5c1" : "normal",
++                    diag.captured ? 1 : 0,
++                    (int)g_cam_state.cmd.owner,
++                    (int)g_cam_state.cmd.route);
++        }
++        if (is_alt_branch && !g_cam_state.logged_first_alt_tick) {
++            g_cam_state.logged_first_alt_tick = true;
++            fprintf(stderr,
++                    "[totk-camera-v143] alternate 0x5c1 branch active: calc=%#llx ctx=%d route=%d (normal_ticks=%llu alt_ticks=%llu)\n",
++                    (unsigned long long)calc_fn_addr,
++                    (int)ctx,
++                    (int)g_cam_state.cmd.route,
++                    (unsigned long long)g_cam_state.normal_branch_ticks,
++                    (unsigned long long)g_cam_state.alt_branch_ticks);
++        }
++    }
++
++    if (g_cam_state.cmd.route == LOOK_ROUTE_DIRECT_ANGLES &&
++        g_cam_state.cmd.owner == LOOK_OWNER_MOUSE) {
++        g_cam_state.direct_active = true;
++        /* TOTK spherical convention: looking right decreases yaw_deg, looking up decreases pitch_deg */
++        g_cam_state.yaw_delta_deg = -(float)(g_cam_state.cmd.yaw_delta_rad * RAD_TO_DEG);
++        g_cam_state.pitch_delta_deg = -(float)(g_cam_state.cmd.pitch_delta_rad * RAD_TO_DEG);
++        /* Ensure right stick on p_ctrl is zeroed and manual-look flags are active */
++        ST64(p_ctrl + 0x420ull, 0ull);
++        uint32_t f418 = LD32(p_ctrl + 0x418ull);
++        ST32(p_ctrl + 0x418ull, f418 & ~0x28u);
++    } else {
++        g_cam_state.direct_active = false;
++        g_cam_state.yaw_delta_deg = 0.0f;
++        g_cam_state.pitch_delta_deg = 0.0f;
++    }
++}
++
++/* ExecutePlayerCameraChase::calc (0x80018e414):
++ * Primary third-person free-roam gameplay camera (mode 0 in ExecutePlayerCameraSwitcher).
++ * 0x80018ec94: str s12, [sp, #0x48] (chase yaw_deg before spherical-to-Cartesian pos update)
++ * 0x80018edec: str s0, [sp, #0x44]  (chase pitch_deg before distance/FOV/pos update)
++ */
++void totk_camera_v143_on_chase_yaw(struct Cpu *c) {
++    uint64_t cam_mode = c->x[20];
++    uint64_t p_ctrl = c->x[26];
++    float yaw = get_vf32(c, 12);
++    if (g_cam_state.direct_active) {
++        uint32_t sub_state = LD32(cam_mode + 0x180ull);
++        bool has_mouse_delta = (fabsf(g_cam_state.yaw_delta_deg) > 1e-6f) ||
++                               (fabsf(g_cam_state.pitch_delta_deg) > 1e-6f);
++        if ((sub_state == 1u || sub_state == 2u) && !has_mouse_delta) {
++            /* Preserve ZL camera recenter behind Link when mouse is stationary */
++            write_f32(c->sp + 0x48ull, yaw);
++            return;
++        }
++        if (sub_state == 1u || sub_state == 2u) {
++            ST32(cam_mode + 0x180ull, 3u);
++        }
++        /* Read unperturbed spherical yaw from start of frame (sp + 0x48) so walking
++         * sideways/backwards in sub_state 3 never auto-orbits or fights the mouse. */
++        yaw = wrap_deg_180(read_f32(c->sp + 0x48ull) + g_cam_state.yaw_delta_deg);
++        set_vf32(c, 12, yaw);
++        write_f32(c->sp + 0x48ull, yaw);
++        write_f32(c->sp + 0x4cull, yaw);
++        write_f32(cam_mode + 0x120ull, yaw);
++        write_f32(cam_mode + 0x124ull, 0.0f);
++        write_f32(cam_mode + 0x128ull, 0.0f);
++        c->x[23] = 0ull;
++        if (p_ctrl != 0) {
++            write_f32(p_ctrl + 0x414ull, yaw);
++            if (has_mouse_delta) {
++                ST32(p_ctrl + 0x5c0ull, LD32(p_ctrl + 0x5c0ull) | 0x1u);
++            }
++        }
++        return;
++    }
++    write_f32(c->sp + 0x48ull, yaw);
++}
++
++void totk_camera_v143_on_chase_pitch(struct Cpu *c) {
++    uint64_t cam_mode = c->x[20];
++    uint64_t p_ctrl = c->x[26];
++    float pitch = get_vf32(c, 0);
++    if (g_cam_state.direct_active) {
++        uint32_t sub_state = LD32(cam_mode + 0x180ull);
++        bool has_mouse_delta = (fabsf(g_cam_state.yaw_delta_deg) > 1e-6f) ||
++                               (fabsf(g_cam_state.pitch_delta_deg) > 1e-6f);
++        if ((sub_state == 1u || sub_state == 2u) && !has_mouse_delta) {
++            write_f32(c->sp + 0x44ull, pitch);
++            mark_applied_current_tick();
++            return;
++        }
++        /* Read unperturbed spherical pitch from start of frame (sp + 0x44) so slope/default
++         * pitch pull (f_800191970) never fights mouse vertical look. */
++        pitch = read_f32(c->sp + 0x44ull) + g_cam_state.pitch_delta_deg;
++        float lo = read_f32(cam_mode + 0xf8ull);
++        float hi = read_f32(cam_mode + 0xfcull);
++        if (!isfinite(lo) || !isfinite(hi) || fabsf(lo - hi) < 1e-3f) {
++            lo = -85.0f;
++            hi = 85.0f;
++        } else {
++            if (lo > hi) {
++                float tmp = lo;
++                lo = hi;
++                hi = tmp;
++            }
++            if (lo < -85.0f) lo = -85.0f;
++            if (hi > 85.0f) hi = 85.0f;
++        }
++        pitch = clamp_f32(pitch, lo, hi);
++        set_vf32(c, 0, pitch);
++        write_f32(c->sp + 0x44ull, pitch);
++        write_f32(cam_mode + 0x108ull, pitch);
++        write_f32(cam_mode + 0x10cull, 0.0f);
++        if (p_ctrl != 0) {
++            write_f32(p_ctrl + 0x410ull, pitch);
++        }
++        mark_applied_current_tick();
++        return;
++    }
++    write_f32(c->sp + 0x44ull, pitch);
++}
++
++/* ExecutePlayerCameraTail::calc (0x8023d4950):
++ * 0x8023d4f34: ldr s0, [x19, #0xc0] (tail_cam->yaw_deg)
++ * 0x8023d5028: ldr s1, [x19, #0xb4] (tail_cam->pitch_deg)
++ */
++void totk_camera_v143_on_tail_yaw(struct Cpu *c) {
++    uint64_t cam_mode = c->x[19];
++    float yaw = read_f32(cam_mode + 0xc0ull);
++    if (g_cam_state.direct_active) {
++        yaw = wrap_deg_180(yaw + g_cam_state.yaw_delta_deg);
++        write_f32(cam_mode + 0xc0ull, yaw);
++        /* Zero auto-orbit offset and angular velocity so manual yaw is exact */
++        write_f32(cam_mode + 0xc4ull, 0.0f);
++        write_f32(cam_mode + 0xc8ull, 0.0f);
++    }
++    set_vf32(c, 0, yaw);
++}
++
++void totk_camera_v143_on_tail_pitch(struct Cpu *c) {
++    uint64_t cam_mode = c->x[19];
++    float pitch = read_f32(cam_mode + 0xb4ull);
++    if (g_cam_state.direct_active) {
++        pitch += g_cam_state.pitch_delta_deg;
++        write_f32(cam_mode + 0xb4ull, pitch);
++        write_f32(cam_mode + 0xb8ull, 0.0f);
++        mark_applied_current_tick();
++    }
++    set_vf32(c, 1, pitch);
++}
++
++/* ExecutePlayerCameraAiming::calc (0x8023be978):
++ * 0x8023bebcc: fadd s0, s1, s0 (target pitch before native mode clamps)
++ * 0x8023bec3c: bl 0x800191970  (spring damper on x19+0x15c / x19+0x160)
++ * 0x8023beeec: ldur s1, [x29, #-0x48] (yaw before native wrap & store to x19+0x158)
++ */
++void totk_camera_v143_on_aim_pitch_add(struct Cpu *c) {
++    float s1 = get_vf32(c, 1);
++    float s0 = get_vf32(c, 0);
++    float res = s1 + s0;
++    if (g_cam_state.direct_active) {
++        res += g_cam_state.pitch_delta_deg;
++    }
++    set_vf32(c, 0, res);
++}
++
++int totk_camera_v143_on_aim_pitch_commit(struct Cpu *c) {
++    if (!g_cam_state.direct_active) return 0;
++    uint64_t cam_mode = c->x[19];
++    /* Copy freshly clamped target pitch (x19+0x154) directly to current pitch (x19+0x15c)
++     * and zero spring velocity (x19+0x160) so bow/throw aiming has zero stick damping lag. */
++    float clamped_pitch = read_f32(cam_mode + 0x154ull);
++    write_f32(cam_mode + 0x15cull, clamped_pitch);
++    write_f32(cam_mode + 0x160ull, 0.0f);
++    return 1;
++}
++
++void totk_camera_v143_on_aim_yaw(struct Cpu *c) {
++    uint64_t ea = c->x[29] - 72ull;
++    float yaw = read_f32(ea);
++    if (g_cam_state.direct_active) {
++        yaw += g_cam_state.yaw_delta_deg;
++        write_f32(ea, yaw);
++        mark_applied_current_tick();
++    }
++    set_vf32(c, 1, yaw);
++}
++
++/* ExecutePlayerCameraAimingTelescope::calc (0x8023c08ac):
++ * 0x8023c0b00: ldr s0, [x19, #0x160] (target pitch before native [min,max] clamp)
++ * 0x8023c0b78: ldr s0, [x19, #0x50]  (current pitch before interpolation)
++ * 0x8023c0e80: ldr s1, [sp, #0x58]   (yaw before native wrap & store to x19+0x164)
++ */
++void totk_camera_v143_on_scope_pitch_load(struct Cpu *c) {
++    uint64_t cam_mode = c->x[19];
++    float pitch = read_f32(cam_mode + 0x160ull);
++    if (g_cam_state.direct_active) {
++        pitch += g_cam_state.pitch_delta_deg;
++        write_f32(cam_mode + 0x160ull, pitch);
++    }
++    set_vf32(c, 0, pitch);
++}
++
++void totk_camera_v143_on_scope_pitch_commit(struct Cpu *c) {
++    uint64_t cam_mode = c->x[19];
++    if (g_cam_state.direct_active) {
++        float clamped = read_f32(cam_mode + 0x160ull);
++        write_f32(cam_mode + 0x50ull, clamped);
++        write_f32(cam_mode + 0x58ull, 0.0f);
++        set_vf32(c, 0, clamped);
++        return;
++    }
++    set_vf32(c, 0, read_f32(cam_mode + 0x50ull));
++}
++
++void totk_camera_v143_on_scope_yaw(struct Cpu *c) {
++    uint64_t ea = c->sp + 0x58ull;
++    float yaw = read_f32(ea);
++    if (g_cam_state.direct_active) {
++        yaw += g_cam_state.yaw_delta_deg;
++        write_f32(ea, yaw);
++        mark_applied_current_tick();
++    }
++    set_vf32(c, 1, yaw);
++}
++
++/* ExecutePlayerCameraCameraFinder::calc (0x8023c26c8):
++ * 0x8023c28c4: str s0, [x19, #0x50] (pitch before native MinPitch/MaxPitch clamp)
++ * 0x8023c2df0: ldr s1, [sp, #0x48]  (yaw before native wrap & limit check)
++ */
++void totk_camera_v143_on_finder_pitch(struct Cpu *c) {
++    uint64_t cam_mode = c->x[19];
++    float pitch = get_vf32(c, 0);
++    if (g_cam_state.direct_active) {
++        pitch += g_cam_state.pitch_delta_deg;
++        set_vf32(c, 0, pitch);
++        write_f32(cam_mode + 0x54ull, 0.0f);
++    }
++    write_f32(cam_mode + 0x50ull, pitch);
++}
++
++void totk_camera_v143_on_finder_yaw(struct Cpu *c) {
++    uint64_t ea = c->sp + 0x48ull;
++    float yaw = read_f32(ea);
++    if (g_cam_state.direct_active) {
++        yaw += g_cam_state.yaw_delta_deg;
++        write_f32(ea, yaw);
++        mark_applied_current_tick();
++    }
++    set_vf32(c, 1, yaw);
++}
++
++/* ExecutePlayerCameraSpecialPower::calc (0x8023d2d40):
++ * 0x8023d3158: ldr s0, [x19, #0x160] (target pitch before native clamp)
++ * 0x8023d31d0: ldr s0, [x19, #0x58]  (after spring damper 0x800191970)
++ * 0x8023d34cc: ldur s1, [x29, #-0x50] (yaw before native wrap & store to x19+0x164)
++ */
++void totk_camera_v143_on_special_pitch_load(struct Cpu *c) {
++    uint64_t cam_mode = c->x[19];
++    float pitch = read_f32(cam_mode + 0x160ull);
++    if (g_cam_state.direct_active) {
++        pitch += g_cam_state.pitch_delta_deg;
++        write_f32(cam_mode + 0x160ull, pitch);
++    }
++    set_vf32(c, 0, pitch);
++}
++
++void totk_camera_v143_on_special_pitch_commit(struct Cpu *c) {
++    uint64_t cam_mode = c->x[19];
++    if (g_cam_state.direct_active) {
++        float clamped = read_f32(cam_mode + 0x160ull);
++        write_f32(cam_mode + 0x50ull, clamped);
++        write_f32(cam_mode + 0x58ull, 0.0f);
++        set_vf32(c, 0, 0.0f);
++        return;
++    }
++    set_vf32(c, 0, read_f32(cam_mode + 0x58ull));
++}
++
++void totk_camera_v143_on_special_yaw(struct Cpu *c) {
++    uint64_t ea = c->x[29] - 80ull;
++    float yaw = read_f32(ea);
++    if (g_cam_state.direct_active) {
++        yaw += g_cam_state.yaw_delta_deg;
++        write_f32(ea, yaw);
++        mark_applied_current_tick();
++    }
++    set_vf32(c, 1, yaw);
++}
++
++/* ExecutePlayerCameraClimbObj::calc (0x8023c3a98):
++ * 0x8023c3bd8: ldr s1, [x19, #0x90] (climb yaw_deg)
++ * 0x8023c3c10: ldr s1, [x19, #0x9c] (climb pitch_deg in s0 / x19+0x98)
++ */
++void totk_camera_v143_on_climb_yaw(struct Cpu *c) {
++    uint64_t cam_mode = c->x[19];
++    float yaw = read_f32(cam_mode + 0x90ull);
++    if (g_cam_state.direct_active) {
++        yaw = wrap_deg_180(yaw + g_cam_state.yaw_delta_deg);
++        write_f32(cam_mode + 0x90ull, yaw);
++        write_f32(cam_mode + 0x94ull, 0.0f);
++        set_vf32(c, 0, 0.0f);
++    }
++    set_vf32(c, 1, yaw);
++}
++
++void totk_camera_v143_on_climb_pitch(struct Cpu *c) {
++    uint64_t cam_mode = c->x[19];
++    if (g_cam_state.direct_active) {
++        float pitch = clamp_f32(get_vf32(c, 0) + g_cam_state.pitch_delta_deg, -85.0f, 85.0f);
++        write_f32(cam_mode + 0x98ull, pitch);
++        write_f32(cam_mode + 0xd8ull, pitch);
++        write_f32(cam_mode + 0x9cull, 0.0f);
++        set_vf32(c, 0, pitch);
++        set_vf32(c, 1, 0.0f);
++        mark_applied_current_tick();
++        return;
++    }
++    set_vf32(c, 1, read_f32(cam_mode + 0x9cull));
++}
++
++/* ExecutePlayerCameraShieldSurfing::calc (0x8023d0088):
++ * 0x8023d0564: ldr s1, [x19, #0xf4]  (surf yaw_deg)
++ * 0x8023d0584: ldr s0, [x19, #0x100] (surf pitch_deg)
++ */
++void totk_camera_v143_on_surf_yaw(struct Cpu *c) {
++    uint64_t cam_mode = c->x[19];
++    float yaw = read_f32(cam_mode + 0xf4ull);
++    if (g_cam_state.direct_active) {
++        yaw = wrap_deg_180(yaw + g_cam_state.yaw_delta_deg);
++        write_f32(cam_mode + 0xf4ull, yaw);
++        write_f32(cam_mode + 0xf8ull, 0.0f);
++        set_vf32(c, 0, 0.0f);
++    }
++    set_vf32(c, 1, yaw);
++}
++
++void totk_camera_v143_on_surf_pitch(struct Cpu *c) {
++    uint64_t cam_mode = c->x[19];
++    float pitch = read_f32(cam_mode + 0x100ull);
++    if (g_cam_state.direct_active) {
++        pitch = clamp_f32(pitch + g_cam_state.pitch_delta_deg, -85.0f, 85.0f);
++        write_f32(cam_mode + 0xfcull, pitch);
++        write_f32(cam_mode + 0x100ull, pitch);
++        write_f32(cam_mode + 0x104ull, 0.0f);
++        mark_applied_current_tick();
++    }
++    set_vf32(c, 0, pitch);
++}
++
++/* ExecutePlayerCameraWakeboard::calc (0x8023da61c):
++ * 0x8023daad0: ldr s1, [x19, #0xf0]       (wakeboard yaw_deg)
++ * 0x8023dab30: ldp s0, s1, [x19, #0xfc]   (wakeboard pitch_deg, pitch_vel)
++ */
++void totk_camera_v143_on_wake_yaw(struct Cpu *c) {
++    uint64_t cam_mode = c->x[19];
++    float yaw = read_f32(cam_mode + 0xf0ull);
++    if (g_cam_state.direct_active) {
++        yaw = wrap_deg_180(yaw + g_cam_state.yaw_delta_deg);
++        write_f32(cam_mode + 0xf0ull, yaw);
++        write_f32(cam_mode + 0xf4ull, 0.0f);
++        set_vf32(c, 0, 0.0f);
++    }
++    set_vf32(c, 1, yaw);
++}
++
++void totk_camera_v143_on_wake_pitch(struct Cpu *c) {
++    uint64_t cam_mode = c->x[19];
++    float pitch = read_f32(cam_mode + 0xfcull);
++    float vel = read_f32(cam_mode + 0x100ull);
++    if (g_cam_state.direct_active) {
++        pitch = clamp_f32(pitch + g_cam_state.pitch_delta_deg, -85.0f, 85.0f);
++        vel = 0.0f;
++        write_f32(cam_mode + 0xf8ull, pitch);
++        write_f32(cam_mode + 0xfcull, pitch);
++        write_f32(cam_mode + 0x100ull, 0.0f);
++        mark_applied_current_tick();
++    }
++    set_vf32(c, 0, pitch);
++    set_vf32(c, 1, vel);
++}
++
++/* ExecutePlayerCameraHorse::calc (0x8023ca518):
++ * 0x8023caa38: ldr s1, [x19, #0xb4] (horse yaw_deg)
++ * 0x8023caaac: ldr s1, [x19, #0xac] (horse pitch_deg)
++ */
++void totk_camera_v143_on_horse_yaw(struct Cpu *c) {
++    uint64_t cam_mode = c->x[19];
++    float yaw = read_f32(cam_mode + 0xb4ull);
++    if (g_cam_state.direct_active) {
++        yaw = wrap_deg_180(yaw + g_cam_state.yaw_delta_deg);
++        write_f32(cam_mode + 0x68ull, yaw);
++        write_f32(cam_mode + 0xb4ull, yaw);
++        write_f32(cam_mode + 0xb8ull, 0.0f);
++        set_vf32(c, 0, 0.0f);
++    }
++    set_vf32(c, 1, yaw);
++}
++
++void totk_camera_v143_on_horse_pitch(struct Cpu *c) {
++    uint64_t cam_mode = c->x[19];
++    float pitch = read_f32(cam_mode + 0xacull);
++    if (g_cam_state.direct_active) {
++        pitch = clamp_f32(pitch + g_cam_state.pitch_delta_deg, -85.0f, 85.0f);
++        write_f32(cam_mode + 0x64ull, pitch);
++        write_f32(cam_mode + 0xacull, pitch);
++        write_f32(cam_mode + 0xb0ull, 0.0f);
++        set_vf32(c, 0, 0.0f);
++        mark_applied_current_tick();
++    }
++    set_vf32(c, 1, pitch);
++}
++
++/* Fallback hook at 0x8007156c0 (bl 0x800717668 inside PlayerCamera::calc f_800715408):
++ * Live registers:
++ *   x19 = p_cam
++ *   x21 = p_ctrl (p_cam + 0x490)
++ * Applies direct spherical rotation to p_ctrl->pose_338 for any direct-camera mode
++ * (such as WaterfallClimb or Abyss) that did not hit a mode-specific hook above,
++ * right before f_800717668 and camera collision (f_80071aec4) execute.
++ */
++void totk_camera_v143_on_player_cam_calc(struct Cpu *c) {
++    if (!g_cam_state.direct_active || g_cam_state.applied_this_tick) return;
++
++    uint64_t p_ctrl = c->x[21];
++    if (p_ctrl == 0) return;
++
++    float pos_x = read_f32(p_ctrl + 0x338ull);
++    float pos_y = read_f32(p_ctrl + 0x33cull);
++    float pos_z = read_f32(p_ctrl + 0x340ull);
++    float at_x  = read_f32(p_ctrl + 0x344ull);
++    float at_y  = read_f32(p_ctrl + 0x348ull);
++    float at_z  = read_f32(p_ctrl + 0x34cull);
++
++    float dx = pos_x - at_x;
++    float dy = pos_y - at_y;
++    float dz = pos_z - at_z;
++    float dist = sqrtf(dx * dx + dy * dy + dz * dz);
++    if (dist > 0.001f && isfinite(dist)) {
++        float pitch_deg = read_f32(p_ctrl + 0x410ull) + g_cam_state.pitch_delta_deg;
++        float yaw_deg   = wrap_deg_180(read_f32(p_ctrl + 0x414ull) + g_cam_state.yaw_delta_deg);
++        pitch_deg = clamp_f32(pitch_deg, -85.0f, 85.0f);
++
++        float pitch_rad = (float)(pitch_deg * DEG_TO_RAD);
++        float yaw_rad   = (float)(yaw_deg * DEG_TO_RAD);
++        float cos_p = cosf(pitch_rad);
++        float sin_p = sinf(pitch_rad);
++        float cos_y = cosf(yaw_rad);
++        float sin_y = sinf(yaw_rad);
++
++        float new_dx = dist * cos_p * sin_y;
++        float new_dy = dist * sin_p;
++        float new_dz = dist * cos_p * cos_y;
++
++        write_f32(p_ctrl + 0x338ull, at_x + new_dx);
++        write_f32(p_ctrl + 0x33cull, at_y + new_dy);
++        write_f32(p_ctrl + 0x340ull, at_z + new_dz);
++        write_f32(p_ctrl + 0x410ull, pitch_deg);
++        write_f32(p_ctrl + 0x414ull, yaw_deg);
++    }
++
++    mark_applied_current_tick();
++}
+diff --git a/src/host/camera_v143.h b/src/host/camera_v143.h
+new file mode 100644
+index 0000000..b80c760
+--- /dev/null
++++ b/src/host/camera_v143.h
+@@ -0,0 +1,99 @@
++#ifndef ULTRATEARS_CAMERA_V143_H
++#define ULTRATEARS_CAMERA_V143_H
++
++#include <stdint.h>
++#include <stdbool.h>
++#include "mouse_camera.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++struct Cpu;
++
++/* Verified TOTK 1.4.3 ExecutePlayerCamera* mode calc entry points (vtable + 0x120) */
++#define TOTK_V143_CALC_CHASE              0x80018e414ull
++#define TOTK_V143_CALC_ABYSS              0x8023bd8d8ull
++#define TOTK_V143_CALC_AIMING             0x8023be978ull
++#define TOTK_V143_CALC_AIMING_TELESCOPE   0x8023c08acull
++#define TOTK_V143_CALC_CAMERA_FINDER      0x8023c26c8ull
++#define TOTK_V143_CALC_CLIMB_OBJ          0x8023c3a98ull
++#define TOTK_V143_CALC_HORSE              0x8023ca518ull
++#define TOTK_V143_CALC_HORSE_LOCKON_EMPTY 0x8023cc210ull
++#define TOTK_V143_CALC_HORSE_REVOLVE      0x8023ccff8ull
++#define TOTK_V143_CALC_LOCKON_AIMING_AT   0x8023ce260ull
++#define TOTK_V143_CALC_SHIELD_SURFING     0x8023d0088ull
++#define TOTK_V143_CALC_SPECIAL_POWER      0x8023d2d40ull
++#define TOTK_V143_CALC_TAIL               0x8023d4950ull
++#define TOTK_V143_CALC_LOCKON_TARGET      0x8023d7140ull
++#define TOTK_V143_CALC_ULTRAHAND          0x8023d8e74ull
++#define TOTK_V143_CALC_WAKEBOARD          0x8023da61cull
++#define TOTK_V143_CALC_WATERFALL_CLIMB    0x8023dce00ull
++
++/* Verified TOTK 1.4.3 right-stick deadzone and response curve constants (f_800874c1c) */
++#define TOTK_V143_STICK_INNER_DEADZONE    0.005f
++#define TOTK_V143_STICK_OUTER_THRESHOLD   0.995f
++#define TOTK_V143_STICK_RESCALE_INV       1.010101f
++#define TOTK_V143_STICK_ACTIVE_RADIAL_SQ  0.01f
++
++/* Pure context classifier exposed for unit testing */
++CameraContext totk_camera_v143_classify_context(uint64_t calc_fn_addr,
++                                                bool stick_blocked_by_ui_or_manip,
++                                                bool *out_menu_wheel,
++                                                bool *out_lock_on,
++                                                bool *out_ultrahand_manip,
++                                                bool *out_vehicle_manual_ok);
++
++/* Query whether gyro should be suppressed from camera/aiming while mouse owns look */
++int totk_camera_v143_suppress_gyro(void);
++
++/* Reset adapter state (for unit tests) */
++void totk_camera_v143_reset_state(void);
++void totk_camera_v143_set_test_time_ns(uint64_t now_ns);
++void totk_camera_v143_get_branch_counts(uint64_t *out_normal, uint64_t *out_alt);
++
++/* Guest hook callbacks invoked from lifted TOTK 1.4.3 main module */
++void totk_camera_v143_on_read_stick(struct Cpu *c);
++void totk_camera_v143_on_switcher_mode(struct Cpu *c);
++void totk_camera_v143_on_mode_pre_calc(struct Cpu *c);
++
++void totk_camera_v143_on_chase_yaw(struct Cpu *c);
++void totk_camera_v143_on_chase_pitch(struct Cpu *c);
++
++void totk_camera_v143_on_tail_yaw(struct Cpu *c);
++void totk_camera_v143_on_tail_pitch(struct Cpu *c);
++
++void totk_camera_v143_on_aim_pitch_add(struct Cpu *c);
++int  totk_camera_v143_on_aim_pitch_commit(struct Cpu *c);
++void totk_camera_v143_on_aim_yaw(struct Cpu *c);
++
++void totk_camera_v143_on_scope_pitch_load(struct Cpu *c);
++void totk_camera_v143_on_scope_pitch_commit(struct Cpu *c);
++void totk_camera_v143_on_scope_yaw(struct Cpu *c);
++
++void totk_camera_v143_on_finder_pitch(struct Cpu *c);
++void totk_camera_v143_on_finder_yaw(struct Cpu *c);
++
++void totk_camera_v143_on_special_pitch_load(struct Cpu *c);
++void totk_camera_v143_on_special_pitch_commit(struct Cpu *c);
++void totk_camera_v143_on_special_yaw(struct Cpu *c);
++
++void totk_camera_v143_on_climb_yaw(struct Cpu *c);
++void totk_camera_v143_on_climb_pitch(struct Cpu *c);
++
++void totk_camera_v143_on_surf_yaw(struct Cpu *c);
++void totk_camera_v143_on_surf_pitch(struct Cpu *c);
++
++void totk_camera_v143_on_wake_yaw(struct Cpu *c);
++void totk_camera_v143_on_wake_pitch(struct Cpu *c);
++
++void totk_camera_v143_on_horse_yaw(struct Cpu *c);
++void totk_camera_v143_on_horse_pitch(struct Cpu *c);
++
++void totk_camera_v143_on_player_cam_calc(struct Cpu *c);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* ULTRATEARS_CAMERA_V143_H */
+diff --git a/src/host/hid_feedback.c b/src/host/hid_feedback.c
+index 2b7f421..973a69d 100644
+--- a/src/host/hid_feedback.c
++++ b/src/host/hid_feedback.c
+@@ -118,9 +118,19 @@ static uint32_t six_states(int *out, SixAxisState *s, int max, const uint32_t *h
+         *out = 1; return 0;
+     }
+     for (int i = 0; i < n; i++) {
+-        SixAxisState *d = &s[i]; *d = (SixAxisState){.delta_ns = (int64_t)m[i].delta_ns, .sampling = (int64_t)m[i].sampling, .attributes = SIX_AXIS_CONNECTED};
+-        memcpy(d->acc, m[i].acc, sizeof d->acc); memcpy(d->gyro, m[i].gyro, sizeof d->gyro);
+-        memcpy(d->angle, m[i].angle, sizeof d->angle); memcpy(d->dir, m[i].dir, sizeof d->dir);
++        SixAxisState *d = &s[i];
++        *d = (SixAxisState){.delta_ns = (int64_t)m[i].delta_ns, .sampling = (int64_t)m[i].sampling,
++                            .attributes = SIX_AXIS_CONNECTED};
++        memcpy(d->acc, m[i].acc, sizeof d->acc);
++        memcpy(d->dir, m[i].dir, sizeof d->dir);
++        if (mouse_camera_should_suppress_gyro()) {
++            /* Keep controller sensor fusion streaming live, but prevent gyro from rotating camera/aim while mouse owns look */
++            memset(d->gyro, 0, sizeof d->gyro);
++            memset(d->angle, 0, sizeof d->angle);
++        } else {
++            memcpy(d->gyro, m[i].gyro, sizeof d->gyro);
++            memcpy(d->angle, m[i].angle, sizeof d->angle);
++        }
+     }
+     *out = n; return 0;
+ }
+diff --git a/src/host/host.h b/src/host/host.h
+index d76fa82..8517e5d 100644
+--- a/src/host/host.h
++++ b/src/host/host.h
+@@ -49,11 +49,16 @@ uint32_t runtime_thread_current_handle(void);
+ int runtime_module_query(uint64_t address, uint64_t *base, uint64_t *size, unsigned *state, unsigned *permission,
+                          unsigned *attribute);
+ 
+-// ---- input (overrides_input.c), fed by the window (window_sdl.c)
++// ---- input (overrides_input.c, mouse_camera.c), fed by the window (window_sdl.c)
++#include "mouse_camera.h"
+ typedef struct { uint64_t buttons; int32_t lx, ly, rx, ry; int connected; } RuntimeGamepadState;
+ void runtime_gamepad_set(const RuntimeGamepadState *s);
+ void runtime_input_key(unsigned code, int down);   // Mac virtual key codes (MacNativeGames' key layout)
+ void runtime_input_clear(void);
++void runtime_input_mouse_config(int enabled, float sensitivity, int invert_y);
++void runtime_input_mouse_motion(float dx, float dy);
++void runtime_input_mouse_clear(void);
++void runtime_input_mouse_frame(uint64_t now_ns);
+ 
+ // ---- window (window_sdl.c): SDL3 on the main thread
+ int window_init(void);              // 1 = window up (presentation may still be missing: logged)
+diff --git a/src/host/keyboard_bindings.def b/src/host/keyboard_bindings.def
+new file mode 100644
+index 0000000..110b3e5
+--- /dev/null
++++ b/src/host/keyboard_bindings.def
+@@ -0,0 +1,29 @@
++/* Shared by the native input layer and input_config.py. SDL physical scancodes;
++ * 512/513/514 = left/right/middle mouse; 0 = unbound. Last column is the existing
++ * Mac-virtual-key input ABI. Left-hand defaults: Shift runs, Space jumps.
++ * Actions describe the game's default controls; in-game swaps/context still apply.
++ */
++INPUT_BINDING(MOVE_UP, "Movement", "Left stick up", "Move forward / navigate up", 26, 0, 13)
++INPUT_BINDING(MOVE_DOWN, "Movement", "Left stick down", "Move backward / navigate down", 22, 0, 1)
++INPUT_BINDING(MOVE_LEFT, "Movement", "Left stick left", "Move left / navigate left", 4, 0, 0)
++INPUT_BINDING(MOVE_RIGHT, "Movement", "Left stick right", "Move right / navigate right", 7, 0, 2)
++INPUT_BINDING(LOOK_UP, "Camera", "Right stick up", "Look up / move scope or selection up", 82, 0, 126)
++INPUT_BINDING(LOOK_DOWN, "Camera", "Right stick down", "Look down / move scope or selection down", 81, 0, 125)
++INPUT_BINDING(LOOK_LEFT, "Camera", "Right stick left", "Look left / move scope or selection left", 80, 0, 123)
++INPUT_BINDING(LOOK_RIGHT, "Camera", "Right stick right", "Look right / move scope or selection right", 79, 0, 124)
++INPUT_BINDING(A, "Actions", "A", "Interact, pick up, talk / confirm", 8, 0, 38)
++INPUT_BINDING(B, "Actions", "B", "Sprint (hold), put away / cancel", 225, 41, 40)
++INPUT_BINDING(X, "Actions", "X", "Jump / paraglider while airborne", 44, 0, 34)
++INPUT_BINDING(Y, "Actions", "Y", "Melee attack / charged attack (hold)", 512, 9, 32)
++INPUT_BINDING(L, "Actions", "L", "Use selected ability / ability wheel (hold)", 6, 0, 12)
++INPUT_BINDING(R, "Actions", "R", "Aim a thrown weapon / throw on release", 23, 0, 14)
++INPUT_BINDING(ZL, "Actions", "ZL", "Focus or lock on / raise shield (hold)", 514, 20, 58)
++INPUT_BINDING(ZR, "Actions", "ZR", "Draw bow (hold) / fire on release", 513, 21, 56)
++INPUT_BINDING(PLUS, "Menus", "+", "Open pouch / inventory and pause menus", 43, 0, 36)
++INPUT_BINDING(MINUS, "Menus", "-", "Open Purah Pad / map and adventure log", 53, 16, 48)
++INPUT_BINDING(STICK_L, "Actions", "Left stick press", "Crouch / stand up", 224, 0, 6)
++INPUT_BINDING(STICK_R, "Actions", "Right stick press", "Open / close the scope (tap)", 226, 0, 8)
++INPUT_BINDING(DPAD_UP, "Quick menus", "D-pad up", "Materials quick menu (hold)", 25, 0, 17)
++INPUT_BINDING(DPAD_DOWN, "Quick menus", "D-pad down", "Whistle for your horse", 10, 0, 5)
++INPUT_BINDING(DPAD_LEFT, "Quick menus", "D-pad left", "Shield quick menu (hold)", 29, 0, 3)
++INPUT_BINDING(DPAD_RIGHT, "Quick menus", "D-pad right", "Weapon / bow quick menu (hold)", 27, 0, 4)
+diff --git a/src/host/keyboard_input.c b/src/host/keyboard_input.c
+new file mode 100644
+index 0000000..374d1f0
+--- /dev/null
++++ b/src/host/keyboard_input.c
+@@ -0,0 +1,98 @@
++/* Configurable physical keyboard/mouse buttons -> the existing guest controller ABI.
++ * Both the native defaults and launcher descriptions use keyboard_bindings.def. */
++#include <SDL3/SDL.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <math.h>
++#include "host.h"
++#include "keyboard_input.h"
++
++typedef struct { const char *id; unsigned defaults[2], keys[2], legacy; int active; } Binding;
++#define INPUT_BINDING(id, group, sw, description, primary, secondary, legacy) \
++    {#id, {primary, secondary}, {primary, secondary}, legacy, 0},
++static Binding bindings[] = {
++#include "keyboard_bindings.def"
++};
++#undef INPUT_BINDING
++_Static_assert(SDL_SCANCODE_COUNT == 512, "input config reserves codes 512..514 for mouse buttons");
++static unsigned char held[INPUT_CODE_COUNT];
++static int mouse_mode;
++
++static int valid_key(unsigned k) {
++    return k < INPUT_CODE_COUNT && k != SDL_SCANCODE_F8 && k != SDL_SCANCODE_F11;
++}
++
++void keyboard_input_init(void) {
++    unsigned char used[INPUT_CODE_COUNT] = {0};
++    const char *mode = getenv("TOTK_CAMERA_MODE");
++    mouse_mode = mode && !strcmp(mode, "mouse");
++    float sensitivity = 1;
++    const char *s = getenv("TOTK_MOUSE_SENSITIVITY");
++    if (s) {
++        char *end; float value = strtof(s, &end);
++        if (end != s && !*end && isfinite(value) && value >= 0.1f && value <= 5.0f) sensitivity = value;
++    }
++    const char *invert = getenv("TOTK_MOUSE_INVERT_Y");
++    runtime_input_mouse_config(mouse_mode, sensitivity, invert && !strcmp(invert, "1"));
++    mouse_camera_init_from_env();
++    MouseCameraConfig mcfg;
++    mouse_camera_get_config(&mcfg);
++    memset(held, 0, sizeof held);
++    for (unsigned i = 0; i < sizeof bindings / sizeof *bindings; i++) {
++        Binding *b = &bindings[i]; char name[64];
++        b->active = 0;
++        memcpy(b->keys, b->defaults, sizeof b->keys);
++        snprintf(name, sizeof name, "TOTK_KEY_%s", b->id);
++        const char *value = getenv(name);
++        if (value) {
++            unsigned a, c; char tail;
++            if (sscanf(value, "%u,%u%c", &a, &c, &tail) == 2 && valid_key(a) && valid_key(c)) {
++                b->keys[0] = a; b->keys[1] = c;
++            } else fprintf(stderr, "[totk-input] invalid %s=%s; using defaults\n", name, value);
++        }
++        for (unsigned j = 0; j < 2; j++) {
++            unsigned code = b->keys[j];
++            if (code && used[code]) {
++                fprintf(stderr, "[totk-input] duplicate key %u on %s; binding cleared\n", code, b->id);
++                b->keys[j] = 0;
++            } else if (code) used[code] = 1;
++        }
++    }
++    fprintf(stderr, "[totk-input] custom keyboard mapping loaded; camera=%s, backend=%s, look=%.4f deg/count, aim=%.2fx, scope=%.2fx, smooth=%dms, compat-sens=%.2f, invert-y=%d\n",
++            mouse_mode ? "mouse (F8 releases/captures cursor)" : "keyboard",
++            mcfg.backend == MOUSE_BACKEND_LEGACY_STICK ? "legacy_stick" : "native",
++            mcfg.look_deg_per_count, mcfg.aim_multiplier, mcfg.scope_multiplier,
++            mcfg.smooth_ms, sensitivity, invert && !strcmp(invert, "1"));
++}
++
++int keyboard_input_mouse_mode(void) { return mouse_mode; }
++
++void keyboard_input_key(unsigned scancode, int down) {
++    if (scancode >= INPUT_CODE_COUNT || !scancode) return;
++    held[scancode] = !!down;
++    for (unsigned i = 0; i < sizeof bindings / sizeof *bindings; i++) {
++        Binding *b = &bindings[i];
++        if (mouse_mode && !strncmp(b->id, "LOOK_", 5)) continue;
++        int active = (b->keys[0] && held[b->keys[0]]) || (b->keys[1] && held[b->keys[1]]);
++        if (active != b->active) { b->active = active; runtime_input_key(b->legacy, active); }
++    }
++}
++
++void keyboard_input_mouse_button(unsigned button, int down) {
++    unsigned code = button == SDL_BUTTON_LEFT ? INPUT_MOUSE_LEFT :
++                    button == SDL_BUTTON_RIGHT ? INPUT_MOUSE_RIGHT :
++                    button == SDL_BUTTON_MIDDLE ? INPUT_MOUSE_MIDDLE : 0;
++    if (code) keyboard_input_key(code, down);
++}
++
++void keyboard_input_release_mouse_buttons(void) {
++    for (unsigned code = INPUT_MOUSE_LEFT; code < INPUT_CODE_COUNT; code++) keyboard_input_key(code, 0);
++}
++
++void keyboard_input_clear(void) {
++    memset(held, 0, sizeof held);
++    for (unsigned i = 0; i < sizeof bindings / sizeof *bindings; i++) bindings[i].active = 0;
++    mouse_camera_reset(MOUSE_RESET_FOCUS_LOST);
++    runtime_input_clear();
++}
+diff --git a/src/host/keyboard_input.h b/src/host/keyboard_input.h
+new file mode 100644
+index 0000000..1d917e3
+--- /dev/null
++++ b/src/host/keyboard_input.h
+@@ -0,0 +1,10 @@
++#pragma once
++#include <stdint.h>
++enum { INPUT_MOUSE_LEFT = 512, INPUT_MOUSE_RIGHT, INPUT_MOUSE_MIDDLE, INPUT_CODE_COUNT };
++
++void keyboard_input_init(void);
++void keyboard_input_key(unsigned scancode, int down);
++void keyboard_input_mouse_button(unsigned button, int down);
++void keyboard_input_release_mouse_buttons(void);
++void keyboard_input_clear(void);
++int keyboard_input_mouse_mode(void);
+diff --git a/src/host/mouse_camera.c b/src/host/mouse_camera.c
+new file mode 100644
+index 0000000..7fd7781
+--- /dev/null
++++ b/src/host/mouse_camera.c
+@@ -0,0 +1,726 @@
++/* Generic PC mouse camera layer: raw delta accumulation, look ownership state machine
++ * (mouse vs right stick), angle conversion, FOV zoom scaling, optional exponential
++ * target-angle smoothing, and single-consumption tick lifecycle.
++ * Independent of TOTK guest memory addresses. */
++#include "mouse_camera.h"
++#include <math.h>
++#include <pthread.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#ifdef _WIN32
++#include <windows.h>
++#else
++#include <time.h>
++#endif
++
++#ifndef M_PI
++#define M_PI 3.14159265358979323846
++#endif
++
++#define STICK_TAKEOVER_THRESHOLD 0.25f
++#define STICK_REARM_THRESHOLD    0.15f
++#define STICK_TAKEOVER_NS        50000000ULL   /* 50 ms above 25% radial magnitude */
++#define STICK_REARM_NS           100000000ULL  /* 100 ms below 15% radial magnitude */
++#define MOUSE_TAKEOVER_COUNTS    1.0           /* 1.0 count accumulated radial motion */
++
++static pthread_mutex_t g_mc_lock = PTHREAD_MUTEX_INITIALIZER;
++
++static MouseCameraConfig g_cfg = {
++    .version = 2,
++    .mouse_mode = 0,
++    .backend = MOUSE_BACKEND_NATIVE,
++    .look_deg_per_count = 0.04,
++    .aim_multiplier = 1.0,
++    .scope_multiplier = 1.0,
++    .smooth_ms = 0,
++    .invert_y = 0,
++    .legacy_sensitivity = 1.0f,
++    .trace_enabled = 0,
++};
++
++static LookOwner g_owner = LOOK_OWNER_MOUSE;
++static bool g_captured = false;
++static uint64_t g_epoch = 1;
++
++/* Pending raw mouse deltas (double precision) */
++static double g_pending_dx = 0.0;
++static double g_pending_dy = 0.0;
++
++/* Right-stick ownership handoff state */
++static bool g_stick_armed = true;
++static bool g_stick_in_neutral = true;
++static uint64_t g_stick_neutral_since_ns = 0;
++static bool g_stick_deflecting = false;
++static uint64_t g_stick_deflect_since_ns = 0;
++static float g_last_stick_mag = 0.0f;
++
++/* Optional exponential smoothing state (target-angle remainder in radians) */
++static double g_smooth_rem_yaw = 0.0;
++static double g_smooth_rem_pitch = 0.0;
++
++/* Tick tracking & single-consumption state */
++static MouseCameraClockFn g_clock_fn = NULL;
++static bool g_has_last_tick = false;
++static uint64_t g_last_tick_id = 0;
++static uint64_t g_last_camera_gen = 0;
++static CameraContext g_last_context = CAMERA_CTX_UNCLASSIFIED;
++static LookCommand g_current_cmd;
++static bool g_cmd_needs_apply = false;
++static bool g_cmd_applied = false;
++static bool g_compat_sampled_by_hid = false;
++static uint64_t g_unapplied_count = 0;
++static uint64_t g_applied_count = 0;
++static uint64_t g_unclassified_count = 0;
++
++void mouse_camera_set_clock_fn(MouseCameraClockFn fn) {
++    pthread_mutex_lock(&g_mc_lock);
++    g_clock_fn = fn;
++    pthread_mutex_unlock(&g_mc_lock);
++}
++
++uint64_t mouse_camera_now_ns(void) {
++    MouseCameraClockFn fn;
++    pthread_mutex_lock(&g_mc_lock);
++    fn = g_clock_fn;
++    pthread_mutex_unlock(&g_mc_lock);
++    if (fn) return fn();
++#ifdef _WIN32
++    static LARGE_INTEGER freq;
++    LARGE_INTEGER now;
++    if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
++    QueryPerformanceCounter(&now);
++    return (uint64_t)((double)now.QuadPart * (1e9 / (double)freq.QuadPart));
++#else
++    struct timespec ts;
++    clock_gettime(CLOCK_MONOTONIC, &ts);
++    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
++#endif
++}
++
++float mouse_camera_wrap_pi(double angle_rad) {
++    if (!isfinite(angle_rad)) return 0.0f;
++    double wrapped = atan2(sin(angle_rad), cos(angle_rad));
++    return (float)wrapped;
++}
++
++float mouse_camera_clamp_pitch(double pitch_rad, float min_rad, float max_rad) {
++    if (!isfinite(pitch_rad)) return 0.0f;
++    double lo = (double)min_rad;
++    double hi = (double)max_rad;
++    if (lo > hi) {
++        double tmp = lo;
++        lo = hi;
++        hi = tmp;
++    }
++    if (pitch_rad < lo) return (float)lo;
++    if (pitch_rad > hi) return (float)hi;
++    return (float)pitch_rad;
++}
++
++void mouse_camera_clamp_stick_vector(double vx, double vy, int32_t *out_rx, int32_t *out_ry) {
++    if (!isfinite(vx) || !isfinite(vy)) {
++        if (out_rx) *out_rx = 0;
++        if (out_ry) *out_ry = 0;
++        return;
++    }
++    double mag = hypot(vx, vy);
++    if (mag > 32767.0) {
++        double scale = 32767.0 / mag;
++        vx *= scale;
++        vy *= scale;
++    }
++    int32_t rx = (int32_t)llround(vx);
++    int32_t ry = (int32_t)llround(vy);
++    if (rx > 32767) rx = 32767;
++    if (rx < -32767) rx = -32767;
++    if (ry > 32767) ry = 32767;
++    if (ry < -32767) ry = -32767;
++    if (out_rx) *out_rx = rx;
++    if (out_ry) *out_ry = ry;
++}
++
++static void clear_motion_locked(MouseResetReason reason) {
++    (void)reason;
++    g_pending_dx = 0.0;
++    g_pending_dy = 0.0;
++    g_smooth_rem_yaw = 0.0;
++    g_smooth_rem_pitch = 0.0;
++    g_cmd_needs_apply = false;
++    g_cmd_applied = false;
++    g_compat_sampled_by_hid = false;
++    g_current_cmd.route = LOOK_ROUTE_NONE;
++    g_current_cmd.yaw_delta_rad = 0.0f;
++    g_current_cmd.pitch_delta_rad = 0.0f;
++    g_current_cmd.compat_rx = 0;
++    g_current_cmd.compat_ry = 0;
++    g_epoch++;
++}
++
++static double parse_double_env(const char *name, double def_val, double min_val, double max_val) {
++    const char *s = getenv(name);
++    if (!s || !*s) return def_val;
++    char *end = NULL;
++    double v = strtod(s, &end);
++    if (end == s || *end != '\0' || !isfinite(v) || v < min_val || v > max_val) return def_val;
++    return v;
++}
++
++void mouse_camera_init_from_env(void) {
++    MouseCameraConfig cfg;
++    cfg.version = 2;
++    const char *ver = getenv("TOTK_MOUSE_CAMERA_VERSION");
++    if (ver && atoi(ver) > 0) cfg.version = atoi(ver);
++
++    const char *mode = getenv("TOTK_CAMERA_MODE");
++    cfg.mouse_mode = (mode && !strcmp(mode, "mouse")) ? 1 : 0;
++
++    const char *backend = getenv("TOTK_MOUSE_BACKEND");
++    if (backend && !strcmp(backend, "legacy_stick"))
++        cfg.backend = MOUSE_BACKEND_LEGACY_STICK;
++    else
++        cfg.backend = MOUSE_BACKEND_NATIVE;
++
++    cfg.look_deg_per_count = parse_double_env("TOTK_MOUSE_LOOK_DEG_PER_COUNT", 0.04, 0.001, 1.0);
++    cfg.aim_multiplier = parse_double_env("TOTK_MOUSE_AIM_MULTIPLIER", 1.0, 0.1, 2.0);
++    cfg.scope_multiplier = parse_double_env("TOTK_MOUSE_SCOPE_MULTIPLIER", 1.0, 0.1, 2.0);
++
++    int smooth = 0;
++    const char *sm = getenv("TOTK_MOUSE_SMOOTH_MS");
++    if (sm) {
++        int val = atoi(sm);
++        if (val == 0 || val == 5 || val == 10) smooth = val;
++    }
++    cfg.smooth_ms = smooth;
++
++    const char *inv = getenv("TOTK_MOUSE_INVERT_Y");
++    cfg.invert_y = (inv && !strcmp(inv, "1")) ? 1 : 0;
++
++    cfg.legacy_sensitivity = (float)parse_double_env("TOTK_MOUSE_SENSITIVITY", 1.0, 0.1, 5.0);
++
++    const char *tr = getenv("TOTK_MOUSE_TRACE");
++    cfg.trace_enabled = (tr && !strcmp(tr, "1")) ? 1 : 0;
++
++    mouse_camera_configure(&cfg);
++}
++
++void mouse_camera_configure(const MouseCameraConfig *cfg) {
++    if (!cfg) return;
++    pthread_mutex_lock(&g_mc_lock);
++    g_cfg = *cfg;
++    if (g_cfg.look_deg_per_count < 0.001 || g_cfg.look_deg_per_count > 1.0 || !isfinite(g_cfg.look_deg_per_count))
++        g_cfg.look_deg_per_count = 0.04;
++    if (g_cfg.aim_multiplier < 0.1 || g_cfg.aim_multiplier > 2.0 || !isfinite(g_cfg.aim_multiplier))
++        g_cfg.aim_multiplier = 1.0;
++    if (g_cfg.scope_multiplier < 0.1 || g_cfg.scope_multiplier > 2.0 || !isfinite(g_cfg.scope_multiplier))
++        g_cfg.scope_multiplier = 1.0;
++    if (g_cfg.smooth_ms != 0 && g_cfg.smooth_ms != 5 && g_cfg.smooth_ms != 10)
++        g_cfg.smooth_ms = 0;
++    if (g_cfg.legacy_sensitivity < 0.1f || g_cfg.legacy_sensitivity > 5.0f || !isfinite(g_cfg.legacy_sensitivity))
++        g_cfg.legacy_sensitivity = 1.0f;
++
++    g_owner = LOOK_OWNER_MOUSE;
++    g_stick_armed = true;
++    g_stick_in_neutral = true;
++    g_stick_neutral_since_ns = 0;
++    g_stick_deflecting = false;
++    g_stick_deflect_since_ns = 0;
++    g_last_stick_mag = 0.0f;
++    g_has_last_tick = false;
++    g_last_tick_id = 0;
++    g_last_camera_gen = 0;
++    g_last_context = CAMERA_CTX_UNCLASSIFIED;
++    g_unapplied_count = 0;
++    g_applied_count = 0;
++    g_unclassified_count = 0;
++    clear_motion_locked(MOUSE_RESET_CONFIG_CHANGED);
++    memset(&g_current_cmd, 0, sizeof g_current_cmd);
++    g_current_cmd.owner = g_owner;
++    g_current_cmd.epoch = g_epoch;
++    g_current_cmd.suppress_gyro = (g_cfg.mouse_mode != 0);
++    g_current_cmd.suppress_gamepad_rstick = (g_cfg.mouse_mode != 0);
++    pthread_mutex_unlock(&g_mc_lock);
++}
++
++void mouse_camera_get_config(MouseCameraConfig *out) {
++    if (!out) return;
++    pthread_mutex_lock(&g_mc_lock);
++    *out = g_cfg;
++    pthread_mutex_unlock(&g_mc_lock);
++}
++
++void mouse_camera_set_capture(bool captured) {
++    pthread_mutex_lock(&g_mc_lock);
++    bool effective = captured && (g_cfg.mouse_mode != 0);
++    if (g_captured != effective) {
++        g_captured = effective;
++        clear_motion_locked(MOUSE_RESET_CAPTURE_CHANGED);
++    } else if (!effective) {
++        clear_motion_locked(MOUSE_RESET_CAPTURE_CHANGED);
++    }
++    pthread_mutex_unlock(&g_mc_lock);
++}
++
++void mouse_camera_reset(MouseResetReason reason) {
++    pthread_mutex_lock(&g_mc_lock);
++    if (reason == MOUSE_RESET_INIT) {
++        g_owner = LOOK_OWNER_MOUSE;
++        g_stick_armed = true;
++        g_stick_in_neutral = true;
++        g_stick_neutral_since_ns = 0;
++        g_stick_deflecting = false;
++        g_stick_deflect_since_ns = 0;
++        g_last_stick_mag = 0.0f;
++        g_has_last_tick = false;
++        g_last_tick_id = 0;
++        g_last_camera_gen = 0;
++        g_last_context = CAMERA_CTX_UNCLASSIFIED;
++        g_unapplied_count = 0;
++        g_applied_count = 0;
++        g_unclassified_count = 0;
++    }
++    clear_motion_locked(reason);
++    pthread_mutex_unlock(&g_mc_lock);
++}
++
++void mouse_camera_push_motion(double dx, double dy, uint64_t event_ns) {
++    (void)event_ns;
++    if (!isfinite(dx) || !isfinite(dy)) return;
++    pthread_mutex_lock(&g_mc_lock);
++    if (!g_cfg.mouse_mode || !g_captured) {
++        pthread_mutex_unlock(&g_mc_lock);
++        return;
++    }
++    g_pending_dx += dx;
++    g_pending_dy += dy;
++
++    if (g_owner == LOOK_OWNER_GAMEPAD) {
++        if (hypot(g_pending_dx, g_pending_dy) >= MOUSE_TAKEOVER_COUNTS) {
++            g_owner = LOOK_OWNER_MOUSE;
++            g_smooth_rem_yaw = 0.0;
++            g_smooth_rem_pitch = 0.0;
++            g_stick_armed = false;
++            g_stick_in_neutral = false;
++            g_stick_neutral_since_ns = 0;
++            g_stick_deflecting = false;
++            g_stick_deflect_since_ns = 0;
++            g_epoch++;
++        }
++    } else {
++        /* Mouse already owns look. If the right stick is currently tilted or attempting takeover,
++         * disarm it so it must return to neutral (<15% for 100ms) before it can claim ownership. */
++        if (g_last_stick_mag >= STICK_REARM_THRESHOLD || g_stick_deflecting) {
++            g_stick_armed = false;
++            g_stick_in_neutral = false;
++            g_stick_neutral_since_ns = 0;
++            g_stick_deflecting = false;
++            g_stick_deflect_since_ns = 0;
++        }
++    }
++    pthread_mutex_unlock(&g_mc_lock);
++}
++
++static void advance_stick_timers_locked(uint64_t now_ns) {
++    if (!g_cfg.mouse_mode || g_owner != LOOK_OWNER_MOUSE || now_ns == 0) return;
++
++    float mag = g_last_stick_mag;
++    if (!g_stick_armed) {
++        if (mag < STICK_REARM_THRESHOLD) {
++            if (!g_stick_in_neutral) {
++                g_stick_in_neutral = true;
++                g_stick_neutral_since_ns = now_ns;
++            } else if (now_ns >= g_stick_neutral_since_ns &&
++                       (now_ns - g_stick_neutral_since_ns) >= STICK_REARM_NS) {
++                g_stick_armed = true;
++                g_stick_deflecting = false;
++                g_stick_deflect_since_ns = 0;
++            }
++        } else {
++            g_stick_in_neutral = false;
++            g_stick_neutral_since_ns = 0;
++        }
++    }
++
++    if (g_stick_armed) {
++        if (mag > STICK_TAKEOVER_THRESHOLD) {
++            if (!g_stick_deflecting) {
++                g_stick_deflecting = true;
++                g_stick_deflect_since_ns = now_ns;
++            } else if (now_ns >= g_stick_deflect_since_ns &&
++                       (now_ns - g_stick_deflect_since_ns) >= STICK_TAKEOVER_NS) {
++                g_owner = LOOK_OWNER_GAMEPAD;
++                g_stick_armed = false;
++                g_stick_in_neutral = false;
++                g_stick_neutral_since_ns = 0;
++                g_stick_deflecting = false;
++                g_stick_deflect_since_ns = 0;
++                clear_motion_locked(MOUSE_RESET_OWNER_CHANGED);
++            }
++        } else {
++            g_stick_deflecting = false;
++            g_stick_deflect_since_ns = 0;
++            if (mag < STICK_REARM_THRESHOLD) {
++                g_stick_in_neutral = true;
++                if (!g_stick_neutral_since_ns) g_stick_neutral_since_ns = now_ns;
++            } else {
++                g_stick_in_neutral = false;
++                g_stick_neutral_since_ns = 0;
++            }
++        }
++    }
++}
++
++void mouse_camera_advance_time(uint64_t now_ns) {
++    if (now_ns == 0) return;
++    pthread_mutex_lock(&g_mc_lock);
++    advance_stick_timers_locked(now_ns);
++    pthread_mutex_unlock(&g_mc_lock);
++}
++
++void mouse_camera_sample_compat_stick(int32_t *out_rx, int32_t *out_ry) {
++    int32_t rx = 0, ry = 0;
++    pthread_mutex_lock(&g_mc_lock);
++    if (g_cfg.mouse_mode && g_captured && g_owner == LOOK_OWNER_MOUSE &&
++        g_current_cmd.route == LOOK_ROUTE_COMPAT_STICK) {
++        rx = g_current_cmd.compat_rx;
++        ry = g_current_cmd.compat_ry;
++        g_compat_sampled_by_hid = true;
++    }
++    pthread_mutex_unlock(&g_mc_lock);
++    if (out_rx) *out_rx = rx;
++    if (out_ry) *out_ry = ry;
++}
++
++void mouse_camera_notify_frame_boundary(void) {
++    pthread_mutex_lock(&g_mc_lock);
++    if (g_compat_sampled_by_hid) {
++        g_current_cmd.compat_rx = 0;
++        g_current_cmd.compat_ry = 0;
++        g_compat_sampled_by_hid = false;
++    }
++    pthread_mutex_unlock(&g_mc_lock);
++}
++
++void mouse_camera_offer_stick(float rx, float ry, uint64_t event_ns) {
++    if (!isfinite(rx) || !isfinite(ry)) return;
++    float mag = hypotf(rx, ry);
++    pthread_mutex_lock(&g_mc_lock);
++    g_last_stick_mag = mag;
++    advance_stick_timers_locked(event_ns);
++    pthread_mutex_unlock(&g_mc_lock);
++}
++
++static LookRoute select_route_locked(const CameraFrame *frame) {
++    if (!g_cfg.mouse_mode || !g_captured || g_owner != LOOK_OWNER_MOUSE)
++        return LOOK_ROUTE_NONE;
++    if (!frame)
++        return LOOK_ROUTE_NONE;
++
++    if (frame->context == CAMERA_CTX_DISABLED || !frame->allow_manual_look)
++        return LOOK_ROUTE_NONE;
++
++    if (frame->context == CAMERA_CTX_UNCLASSIFIED)
++        return LOOK_ROUTE_NONE;
++
++    if (frame->context == CAMERA_CTX_LOCK_ON)
++        return LOOK_ROUTE_NONE;
++
++    if (frame->context == CAMERA_CTX_MENU_WHEEL || frame->context == CAMERA_CTX_ULTRAHAND_OBJECT)
++        return LOOK_ROUTE_COMPAT_STICK;
++
++    if (g_cfg.backend == MOUSE_BACKEND_LEGACY_STICK)
++        return LOOK_ROUTE_COMPAT_STICK;
++
++    switch (frame->context) {
++    case CAMERA_CTX_FREE_ROAM:
++    case CAMERA_CTX_AIM:
++    case CAMERA_CTX_SCOPE:
++    case CAMERA_CTX_ULTRAHAND_LOOK:
++    case CAMERA_CTX_VEHICLE:
++        return LOOK_ROUTE_DIRECT_ANGLES;
++    default:
++        return LOOK_ROUTE_NONE;
++    }
++}
++
++void mouse_camera_begin_tick(const CameraFrame *frame, LookCommand *out) {
++    LookCommand local_out;
++    memset(&local_out, 0, sizeof local_out);
++    if (!frame) {
++        if (out) *out = local_out;
++        return;
++    }
++
++    pthread_mutex_lock(&g_mc_lock);
++
++    /* Guard against duplicate calls within the exact same logical tick_id */
++    if (g_has_last_tick && frame->tick_id == g_last_tick_id) {
++        local_out = g_current_cmd;
++        if (g_cmd_applied) {
++            /* Already applied on this tick: return zero delta so it cannot be applied twice */
++            local_out.route = LOOK_ROUTE_NONE;
++            local_out.yaw_delta_rad = 0.0f;
++            local_out.pitch_delta_rad = 0.0f;
++        }
++        pthread_mutex_unlock(&g_mc_lock);
++        if (out) *out = local_out;
++        return;
++    }
++
++    /* Check if the previous tick had direct look motion that was never marked applied */
++    if (g_has_last_tick && g_cmd_needs_apply && !g_cmd_applied) {
++        g_unapplied_count++;
++        if (g_cfg.trace_enabled) {
++            fprintf(stderr, "[totk-mouse-trace] WARNING: tick %llu (epoch %llu, ctx %d) had direct motion (yaw=%.5f, pitch=%.5f) that was not applied\n",
++                    (unsigned long long)g_last_tick_id, (unsigned long long)g_current_cmd.epoch,
++                    (int)g_current_cmd.context, g_current_cmd.yaw_delta_rad, g_current_cmd.pitch_delta_rad);
++        }
++    }
++
++    /* Context or camera generation transitions re-anchor smoothing and invalidate old state */
++    if (g_has_last_tick) {
++        if (frame->context != g_last_context) {
++            g_smooth_rem_yaw = 0.0;
++            g_smooth_rem_pitch = 0.0;
++            g_epoch++;
++            if (frame->context == CAMERA_CTX_DISABLED || !frame->allow_manual_look) {
++                g_pending_dx = 0.0;
++                g_pending_dy = 0.0;
++            }
++        } else if (frame->camera_generation != g_last_camera_gen && frame->camera_generation != 0 && g_last_camera_gen != 0) {
++            g_smooth_rem_yaw = 0.0;
++            g_smooth_rem_pitch = 0.0;
++            g_epoch++;
++        }
++    }
++
++    g_has_last_tick = true;
++    g_last_tick_id = frame->tick_id;
++    g_last_camera_gen = frame->camera_generation;
++    g_last_context = frame->context;
++    g_cmd_needs_apply = false;
++    g_cmd_applied = false;
++    g_compat_sampled_by_hid = false;
++
++    if (frame->now_ns != 0) {
++        advance_stick_timers_locked(frame->now_ns);
++    }
++
++    if (frame->context == CAMERA_CTX_UNCLASSIFIED) {
++        g_unclassified_count++;
++        if (g_cfg.trace_enabled) {
++            fprintf(stderr, "[totk-mouse-trace] tick %llu: unclassified camera context (gen=%#llx)\n",
++                    (unsigned long long)frame->tick_id, (unsigned long long)frame->camera_generation);
++        }
++    }
++
++    /* If disabled / loading / cutscene / no manual look, drop pending motion */
++    if (frame->context == CAMERA_CTX_DISABLED || !frame->allow_manual_look) {
++        g_pending_dx = 0.0;
++        g_pending_dy = 0.0;
++        g_smooth_rem_yaw = 0.0;
++        g_smooth_rem_pitch = 0.0;
++    }
++
++    LookRoute route = select_route_locked(frame);
++    double snap_dx = 0.0;
++    double snap_dy = 0.0;
++
++    if (g_owner == LOOK_OWNER_MOUSE && g_cfg.mouse_mode && g_captured) {
++        snap_dx = g_pending_dx;
++        snap_dy = g_pending_dy;
++        g_pending_dx = 0.0;
++        g_pending_dy = 0.0;
++    }
++
++    local_out.owner = g_owner;
++    local_out.route = route;
++    local_out.tick_id = frame->tick_id;
++    local_out.epoch = g_epoch;
++    local_out.camera_generation = frame->camera_generation;
++    local_out.context = frame->context;
++    local_out.consumed_dx = snap_dx;
++    local_out.consumed_dy = snap_dy;
++    local_out.target_yaw_rad = frame->current_yaw_rad;
++    local_out.target_pitch_rad = frame->current_pitch_rad;
++    local_out.suppress_gyro = (g_cfg.mouse_mode != 0 && g_owner == LOOK_OWNER_MOUSE);
++    local_out.suppress_gamepad_rstick = (g_cfg.mouse_mode != 0 && g_owner == LOOK_OWNER_MOUSE);
++
++    if (route == LOOK_ROUTE_DIRECT_ANGLES) {
++        double scale_deg = g_cfg.look_deg_per_count;
++
++        if (frame->context == CAMERA_CTX_AIM || frame->context == CAMERA_CTX_SCOPE) {
++            double fov_scale = 1.0;
++            if (frame->current_vfov_rad > 0.01f && frame->current_vfov_rad < 3.05f &&
++                frame->neutral_vfov_rad > 0.01f && frame->neutral_vfov_rad < 3.05f) {
++                double num = tan(0.5 * (double)frame->current_vfov_rad);
++                double den = tan(0.5 * (double)frame->neutral_vfov_rad);
++                if (den > 1e-6 && isfinite(num / den)) {
++                    fov_scale = num / den;
++                    if (fov_scale < 0.02) fov_scale = 0.02;
++                    if (fov_scale > 2.5) fov_scale = 2.5;
++                }
++            }
++            double mult = (frame->context == CAMERA_CTX_AIM) ? g_cfg.aim_multiplier : g_cfg.scope_multiplier;
++            scale_deg *= fov_scale * mult;
++        }
++
++        double raw_yaw_deg = snap_dx * scale_deg;
++        double raw_pitch_deg = (g_cfg.invert_y ? snap_dy : -snap_dy) * scale_deg;
++        double raw_yaw_rad = raw_yaw_deg * (M_PI / 180.0);
++        double raw_pitch_rad = raw_pitch_deg * (M_PI / 180.0);
++
++        double step_yaw_rad = raw_yaw_rad;
++        double step_pitch_rad = raw_pitch_rad;
++
++        if (g_cfg.smooth_ms > 0) {
++            g_smooth_rem_yaw += raw_yaw_rad;
++            g_smooth_rem_pitch += raw_pitch_rad;
++            double tau = (double)g_cfg.smooth_ms * 1e-3;
++            double dt = (frame->dt_sec > 1e-5 && frame->dt_sec <= 0.25) ? frame->dt_sec : (1.0 / 60.0);
++            double alpha = 1.0 - exp(-dt / tau);
++            if (alpha < 0.0) alpha = 0.0;
++            if (alpha > 1.0) alpha = 1.0;
++            step_yaw_rad = g_smooth_rem_yaw * alpha;
++            step_pitch_rad = g_smooth_rem_pitch * alpha;
++            g_smooth_rem_yaw -= step_yaw_rad;
++            g_smooth_rem_pitch -= step_pitch_rad;
++            if (fabs(g_smooth_rem_yaw) < 1e-7 && fabs(g_smooth_rem_pitch) < 1e-7) {
++                step_yaw_rad += g_smooth_rem_yaw;
++                step_pitch_rad += g_smooth_rem_pitch;
++                g_smooth_rem_yaw = 0.0;
++                g_smooth_rem_pitch = 0.0;
++            }
++        } else {
++            g_smooth_rem_yaw = 0.0;
++            g_smooth_rem_pitch = 0.0;
++        }
++
++        local_out.yaw_delta_rad = (float)step_yaw_rad;
++        local_out.pitch_delta_rad = (float)step_pitch_rad;
++        local_out.target_yaw_rad = mouse_camera_wrap_pi((double)frame->current_yaw_rad + step_yaw_rad);
++        local_out.target_pitch_rad = mouse_camera_clamp_pitch((double)frame->current_pitch_rad + step_pitch_rad,
++                                                              frame->pitch_min_rad, frame->pitch_max_rad);
++        if (fabsf(local_out.yaw_delta_rad) > 0.0f || fabsf(local_out.pitch_delta_rad) > 0.0f) {
++            g_cmd_needs_apply = true;
++        }
++    } else if (route == LOOK_ROUTE_COMPAT_STICK) {
++        double dt = frame->dt_sec;
++        if (dt >= 0.001 && dt <= 0.25) {
++            double scale = 32767.0 * (double)g_cfg.legacy_sensitivity / (1000.0 * dt);
++            double vx = snap_dx * scale;
++            double vy = snap_dy * scale * (g_cfg.invert_y ? 1.0 : -1.0);
++            mouse_camera_clamp_stick_vector(vx, vy, &local_out.compat_rx, &local_out.compat_ry);
++        }
++    }
++
++    g_current_cmd = local_out;
++
++    if (g_cfg.trace_enabled) {
++        fprintf(stderr, "[totk-mouse-trace] tick=%llu epoch=%llu owner=%d route=%d ctx=%d dx=%.3f dy=%.3f dyaw=%.5f dpitch=%.5f tyaw=%.4f tpitch=%.4f\n",
++                (unsigned long long)local_out.tick_id, (unsigned long long)local_out.epoch,
++                (int)local_out.owner, (int)local_out.route, (int)local_out.context,
++                snap_dx, snap_dy, local_out.yaw_delta_rad, local_out.pitch_delta_rad,
++                local_out.target_yaw_rad, local_out.target_pitch_rad);
++    }
++
++    pthread_mutex_unlock(&g_mc_lock);
++    if (out) *out = local_out;
++}
++
++void mouse_camera_mark_applied(uint64_t tick_id, uint64_t camera_generation) {
++    pthread_mutex_lock(&g_mc_lock);
++    if (g_has_last_tick && tick_id == g_last_tick_id &&
++        (camera_generation == 0 || g_last_camera_gen == 0 || camera_generation == g_last_camera_gen)) {
++        if (!g_cmd_applied) {
++            g_cmd_applied = true;
++            g_applied_count++;
++        }
++    }
++    pthread_mutex_unlock(&g_mc_lock);
++}
++
++LookOwner mouse_camera_current_owner(void) {
++    pthread_mutex_lock(&g_mc_lock);
++    LookOwner o = g_owner;
++    pthread_mutex_unlock(&g_mc_lock);
++    return o;
++}
++
++bool mouse_camera_is_captured(void) {
++    pthread_mutex_lock(&g_mc_lock);
++    bool c = g_captured;
++    pthread_mutex_unlock(&g_mc_lock);
++    return c;
++}
++
++bool mouse_camera_should_suppress_gyro(void) {
++    pthread_mutex_lock(&g_mc_lock);
++    bool suppress = (g_cfg.mouse_mode != 0 && g_owner == LOOK_OWNER_MOUSE);
++    pthread_mutex_unlock(&g_mc_lock);
++    return suppress;
++}
++
++void mouse_camera_resolve_npad_sticks(int32_t key_lx, int32_t key_ly,
++                                      int32_t key_rx, int32_t key_ry,
++                                      int32_t pad_lx, int32_t pad_ly,
++                                      int32_t pad_rx, int32_t pad_ry,
++                                      int32_t *out_lx, int32_t *out_ly,
++                                      int32_t *out_rx, int32_t *out_ry) {
++    /* Left stick: select stronger 2D vector as a unit, never mixing X and Y across devices */
++    double key_l_mag = hypot((double)key_lx, (double)key_ly);
++    double pad_l_mag = hypot((double)pad_lx, (double)pad_ly);
++    if (pad_l_mag > key_l_mag) {
++        if (out_lx) *out_lx = pad_lx;
++        if (out_ly) *out_ly = pad_ly;
++    } else {
++        if (out_lx) *out_lx = key_lx;
++        if (out_ly) *out_ly = key_ly;
++    }
++
++    pthread_mutex_lock(&g_mc_lock);
++    if (!g_cfg.mouse_mode) {
++        /* Keyboard camera mode: select stronger 2D vector as a unit */
++        double key_r_mag = hypot((double)key_rx, (double)key_ry);
++        double pad_r_mag = hypot((double)pad_rx, (double)pad_ry);
++        if (pad_r_mag > key_r_mag) {
++            if (out_rx) *out_rx = pad_rx;
++            if (out_ry) *out_ry = pad_ry;
++        } else {
++            if (out_rx) *out_rx = key_rx;
++            if (out_ry) *out_ry = key_ry;
++        }
++    } else {
++        /* Mouse camera mode: single look owner */
++        if (g_owner == LOOK_OWNER_GAMEPAD) {
++            if (out_rx) *out_rx = pad_rx;
++            if (out_ry) *out_ry = pad_ry;
++        } else {
++            if (g_current_cmd.route == LOOK_ROUTE_COMPAT_STICK) {
++                if (out_rx) *out_rx = g_current_cmd.compat_rx;
++                if (out_ry) *out_ry = g_current_cmd.compat_ry;
++            } else {
++                if (out_rx) *out_rx = 0;
++                if (out_ry) *out_ry = 0;
++            }
++        }
++    }
++    pthread_mutex_unlock(&g_mc_lock);
++}
++
++void mouse_camera_get_diag(MouseCameraDiag *out) {
++    if (!out) return;
++    pthread_mutex_lock(&g_mc_lock);
++    out->epoch = g_epoch;
++    out->last_tick_id = g_last_tick_id;
++    out->unapplied_count = g_unapplied_count;
++    out->applied_count = g_applied_count;
++    out->unclassified_count = g_unclassified_count;
++    out->owner = g_owner;
++    out->captured = g_captured;
++    out->stick_armed = g_stick_armed;
++    out->pending_dx = g_pending_dx;
++    out->pending_dy = g_pending_dy;
++    out->last_cmd = g_current_cmd;
++    pthread_mutex_unlock(&g_mc_lock);
++}
+diff --git a/src/host/mouse_camera.h b/src/host/mouse_camera.h
+new file mode 100644
+index 0000000..99acbc8
+--- /dev/null
++++ b/src/host/mouse_camera.h
+@@ -0,0 +1,146 @@
++#pragma once
++#include <stdbool.h>
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++typedef enum {
++    LOOK_OWNER_MOUSE = 0,
++    LOOK_OWNER_GAMEPAD = 1,
++} LookOwner;
++
++typedef enum {
++    LOOK_ROUTE_NONE = 0,
++    LOOK_ROUTE_DIRECT_ANGLES = 1,
++    LOOK_ROUTE_COMPAT_STICK = 2,
++} LookRoute;
++
++typedef enum {
++    MOUSE_BACKEND_NATIVE = 0,
++    MOUSE_BACKEND_LEGACY_STICK = 1,
++} MouseBackend;
++
++typedef enum {
++    CAMERA_CTX_UNCLASSIFIED = 0,
++    CAMERA_CTX_FREE_ROAM = 1,
++    CAMERA_CTX_AIM = 2,
++    CAMERA_CTX_SCOPE = 3,
++    CAMERA_CTX_LOCK_ON = 4,
++    CAMERA_CTX_MENU_WHEEL = 5,
++    CAMERA_CTX_ULTRAHAND_LOOK = 6,
++    CAMERA_CTX_ULTRAHAND_OBJECT = 7,
++    CAMERA_CTX_VEHICLE = 8,
++    CAMERA_CTX_DISABLED = 9,
++} CameraContext;
++
++typedef enum {
++    MOUSE_RESET_INIT = 0,
++    MOUSE_RESET_FOCUS_LOST = 1,
++    MOUSE_RESET_CAPTURE_CHANGED = 2,
++    MOUSE_RESET_CONTEXT_CHANGED = 3,
++    MOUSE_RESET_OWNER_CHANGED = 4,
++    MOUSE_RESET_CAMERA_GENERATION = 5,
++    MOUSE_RESET_DISABLED_STATE = 6,
++    MOUSE_RESET_CONFIG_CHANGED = 7,
++} MouseResetReason;
++
++typedef struct {
++    int version;
++    int mouse_mode;
++    MouseBackend backend;
++    double look_deg_per_count;
++    double aim_multiplier;
++    double scope_multiplier;
++    int smooth_ms;
++    int invert_y;
++    float legacy_sensitivity;
++    int trace_enabled;
++} MouseCameraConfig;
++
++typedef struct {
++    uint64_t tick_id;
++    uint64_t camera_generation;
++    CameraContext context;
++    uint64_t now_ns;
++    double dt_sec;
++    bool allow_manual_look;
++    float current_yaw_rad;
++    float current_pitch_rad;
++    float pitch_min_rad;
++    float pitch_max_rad;
++    float current_vfov_rad;
++    float neutral_vfov_rad;
++} CameraFrame;
++
++typedef struct {
++    LookOwner owner;
++    LookRoute route;
++    uint64_t tick_id;
++    uint64_t epoch;
++    uint64_t camera_generation;
++    CameraContext context;
++    double consumed_dx;
++    double consumed_dy;
++    float yaw_delta_rad;
++    float pitch_delta_rad;
++    float target_yaw_rad;
++    float target_pitch_rad;
++    int32_t compat_rx;
++    int32_t compat_ry;
++    bool suppress_gyro;
++    bool suppress_gamepad_rstick;
++} LookCommand;
++
++typedef struct {
++    uint64_t epoch;
++    uint64_t last_tick_id;
++    uint64_t unapplied_count;
++    uint64_t applied_count;
++    uint64_t unclassified_count;
++    LookOwner owner;
++    bool captured;
++    bool stick_armed;
++    double pending_dx;
++    double pending_dy;
++    LookCommand last_cmd;
++} MouseCameraDiag;
++
++typedef uint64_t (*MouseCameraClockFn)(void);
++
++void mouse_camera_set_clock_fn(MouseCameraClockFn fn);
++uint64_t mouse_camera_now_ns(void);
++void mouse_camera_advance_time(uint64_t now_ns);
++void mouse_camera_sample_compat_stick(int32_t *out_rx, int32_t *out_ry);
++void mouse_camera_notify_frame_boundary(void);
++
++void mouse_camera_init_from_env(void);
++void mouse_camera_configure(const MouseCameraConfig *cfg);
++void mouse_camera_get_config(MouseCameraConfig *out);
++
++void mouse_camera_push_motion(double dx, double dy, uint64_t event_ns);
++void mouse_camera_offer_stick(float rx, float ry, uint64_t event_ns);
++void mouse_camera_set_capture(bool captured);
++void mouse_camera_reset(MouseResetReason reason);
++void mouse_camera_begin_tick(const CameraFrame *frame, LookCommand *out);
++void mouse_camera_mark_applied(uint64_t tick_id, uint64_t camera_generation);
++
++LookOwner mouse_camera_current_owner(void);
++bool mouse_camera_is_captured(void);
++bool mouse_camera_should_suppress_gyro(void);
++void mouse_camera_resolve_npad_sticks(int32_t key_lx, int32_t key_ly,
++                                      int32_t key_rx, int32_t key_ry,
++                                      int32_t pad_lx, int32_t pad_ly,
++                                      int32_t pad_rx, int32_t pad_ry,
++                                      int32_t *out_lx, int32_t *out_ly,
++                                      int32_t *out_rx, int32_t *out_ry);
++void mouse_camera_get_diag(MouseCameraDiag *out);
++
++float mouse_camera_wrap_pi(double angle_rad);
++float mouse_camera_clamp_pitch(double pitch_rad, float min_rad, float max_rad);
++void mouse_camera_clamp_stick_vector(double vx, double vy, int32_t *out_rx, int32_t *out_ry);
++
++#ifdef __cplusplus
++}
++#endif
+diff --git a/src/host/overrides_input.c b/src/host/overrides_input.c
+index cacac88..db38eb8 100644
+--- a/src/host/overrides_input.c
++++ b/src/host/overrides_input.c
+@@ -1,8 +1,8 @@
+ /* nn::hid: one full-key controller (docked) or the handheld controller, fed by the keyboard and game controllers.
+  * Ported from MacNativeGames games/totk/runtime/input.c @b75be8c (MIT); state ABI follows libnx HID. Changes: key codes
+- * stay MacNativeGames' (Mac virtual key codes) and the window layer translates its own keys into them; the game
+- * controller source is runtime_gamepad_read (none until the window / SDL3 layer of milestone 3.2); the diagnostic input
+- * script / file commands are not ported. */
++ * retain the Mac virtual-key ABI; keyboard_input.c translates the saved SDL physical bindings. Relative mouse
++ * motion produces one right-stick sample per game frame. The SDL gamepad state is combined with keyboard/mouse. */
++#include <math.h>
+ #include <pthread.h>
+ #include <stdbool.h>
+ #include <stdio.h>
+@@ -23,6 +23,44 @@ static uint64_t pending;
+ static uint32_t styles = 1;
+ static bool enabled, allowed = true;
+ static int64_t sample;
++static int mouse_enabled, mouse_invert_y;
++static float mouse_sensitivity = 1;
++static double mouse_dx, mouse_dy;
++static int32_t mouse_rx, mouse_ry;
++static uint64_t mouse_frame_ns;
++
++void runtime_input_mouse_config(int on, float sensitivity, int invert_y) {
++    pthread_mutex_lock(&input_lock);
++    mouse_enabled = on; mouse_sensitivity = sensitivity; mouse_invert_y = invert_y;
++    mouse_dx = mouse_dy = 0; mouse_rx = mouse_ry = 0; mouse_frame_ns = 0;
++    pthread_mutex_unlock(&input_lock);
++}
++void runtime_input_mouse_motion(float dx, float dy) {
++    pthread_mutex_lock(&input_lock);
++    if (mouse_enabled) { mouse_dx += dx; mouse_dy += dy; }
++    pthread_mutex_unlock(&input_lock);
++}
++void runtime_input_mouse_clear(void) {
++    pthread_mutex_lock(&input_lock);
++    mouse_dx = mouse_dy = 0; mouse_rx = mouse_ry = 0; mouse_frame_ns = 0;
++    pthread_mutex_unlock(&input_lock);
++}
++/* Convert pixels per second to a compatibility right-stick vector once per game frame
++ * using radial vector clamping (preserving 2D direction without independent axis clipping). */
++void runtime_input_mouse_frame(uint64_t now_ns) {
++    pthread_mutex_lock(&input_lock);
++    uint64_t dt = now_ns - mouse_frame_ns;
++    mouse_rx = mouse_ry = 0;
++    if (mouse_enabled && mouse_frame_ns && dt >= 1000000 && dt <= 250000000) {
++        double scale = 32767.0 * mouse_sensitivity / (1000.0 * (dt * 1e-9));
++        double vx = mouse_dx * scale;
++        double vy = mouse_dy * scale * (mouse_invert_y ? 1.0 : -1.0);
++        mouse_camera_clamp_stick_vector(vx, vy, &mouse_rx, &mouse_ry);
++    }
++    mouse_frame_ns = now_ns;
++    mouse_dx = mouse_dy = 0;
++    pthread_mutex_unlock(&input_lock);
++}
+ 
+ /* Mac virtual key codes -> Switch buttons (MacNativeGames' layout: J=A, K/Space=B, I=X, U=Y, Z/C=L/R ...). */
+ static uint64_t button(unsigned code) {
+@@ -50,13 +88,16 @@ void runtime_input_clear(void) {
+     pthread_mutex_lock(&input_lock);
+     memset(keys, 0, sizeof keys);
+     pending = 0;
++    mouse_dx = mouse_dy = 0; mouse_rx = mouse_ry = 0; mouse_frame_ns = 0;
+     memset(&g_pad, 0, sizeof g_pad);
+     pthread_mutex_unlock(&input_lock);
+ }
+ 
+ /* TOTK_INPUT_SCRIPT=<frame>:<key>[*<frames held>],... (development: drive the game without a person, e.g.
+    "520:J,700:J*30,900:W*120"). Frames are the graphics frontend's frames; keys are named as on the keyboard
+-   (A-Z, RETURN, SPACE, TAB, ESCAPE, UP, DOWN, LEFT, RIGHT, LSHIFT, LALT) and go through the same layout as typing. */
++   (A-Z, RETURN, SPACE, TAB, ESCAPE, UP, DOWN, LEFT, RIGHT, LSHIFT, LALT). These diagnostic commands retain the
++   original layout independently of the user's physical-key remapping. This callback also advances the mouse sample
++   during normal gameplay, even when no input script is configured. */
+ static int script_code(const char *k, size_t n) {
+     static const struct { const char *name; int code; } named[] = {
+         {"RETURN", 36}, {"SPACE", 49}, {"TAB", 48}, {"ESCAPE", 53}, {"UP", 126}, {"DOWN", 125}, {"LEFT", 123},
+@@ -68,6 +109,7 @@ static int script_code(const char *k, size_t n) {
+     return -1;
+ }
+ void runtime_input_script_tick(uint64_t frame) {
++    runtime_input_mouse_frame(runtime_now_ns());
+     static const char *script;
+     static int init;
+     if (!init) { init = 1; script = getenv("TOTK_INPUT_SCRIPT"); }
+@@ -118,17 +160,57 @@ static int pad_states(NpadState *out, int max, const uint32_t *id, uint32_t want
+         for (unsigned i = 0; i < 128; i++) if (keys[i]) state.buttons |= button(i);
+         state.buttons |= pending;
+         pending = 0;
+-        state.lx = 32767 * ((int)keys[2] - (int)keys[0]);       /* D / A */
+-        state.ly = 32767 * ((int)keys[13] - (int)keys[1]);      /* W / S */
+-        state.rx = 32767 * ((int)keys[124] - (int)keys[123]);   /* arrow right / left */
+-        state.ry = 32767 * ((int)keys[126] - (int)keys[125]);   /* arrow up / down */
++        int32_t key_lx = 32767 * ((int)keys[2] - (int)keys[0]);       /* D / A */
++        int32_t key_ly = 32767 * ((int)keys[13] - (int)keys[1]);      /* W / S */
++        int32_t key_rx = 32767 * ((int)keys[124] - (int)keys[123]);   /* arrow right / left */
++        int32_t key_ry = 32767 * ((int)keys[126] - (int)keys[125]);   /* arrow up / down */
+         RuntimeGamepadState pad;
+         gamepad_read(&pad);
+         state.buttons |= pad.buttons;
+-        if (abs(pad.lx) > abs(state.lx)) state.lx = pad.lx;
+-        if (abs(pad.ly) > abs(state.ly)) state.ly = pad.ly;
+-        if (abs(pad.rx) > abs(state.rx)) state.rx = pad.rx;
+-        if (abs(pad.ry) > abs(state.ry)) state.ry = pad.ry;
++
++        /* Left stick: select stronger 2D vector as a unit (never mix X and Y across devices) */
++        if (hypot((double)pad.lx, (double)pad.ly) > hypot((double)key_lx, (double)key_ly)) {
++            state.lx = pad.lx;
++            state.ly = pad.ly;
++        } else {
++            state.lx = key_lx;
++            state.ly = key_ly;
++        }
++
++        /* Right stick: single look owner in mouse mode; no per-axis mixing */
++        if (!mouse_enabled) {
++            if (hypot((double)pad.rx, (double)pad.ry) > hypot((double)key_rx, (double)key_ry)) {
++                state.rx = pad.rx;
++                state.ry = pad.ry;
++            } else {
++                state.rx = key_rx;
++                state.ry = key_ry;
++            }
++        } else {
++            MouseCameraConfig mcfg;
++            MouseCameraDiag mdiag;
++            mouse_camera_get_config(&mcfg);
++            mouse_camera_get_diag(&mdiag);
++            if (mdiag.owner == LOOK_OWNER_GAMEPAD) {
++                state.rx = pad.rx;
++                state.ry = pad.ry;
++            } else if (mcfg.backend == MOUSE_BACKEND_LEGACY_STICK) {
++                state.rx = mouse_rx;
++                state.ry = mouse_ry;
++            } else if (mdiag.last_cmd.route == LOOK_ROUTE_COMPAT_STICK) {
++                if (mdiag.last_cmd.compat_rx != 0 || mdiag.last_cmd.compat_ry != 0) {
++                    state.rx = mdiag.last_cmd.compat_rx;
++                    state.ry = mdiag.last_cmd.compat_ry;
++                } else {
++                    state.rx = mouse_rx;
++                    state.ry = mouse_ry;
++                }
++            } else {
++                /* Direct angle look (or lock-on / disabled): do not feed Npad right stick */
++                state.rx = 0;
++                state.ry = 0;
++            }
++        }
+     }
+     *out = state;
+     pthread_mutex_unlock(&input_lock);
+diff --git a/src/host/window_sdl.c b/src/host/window_sdl.c
+index 6ab3b73..f8ba4a5 100644
+--- a/src/host/window_sdl.c
++++ b/src/host/window_sdl.c
+@@ -1,7 +1,7 @@
+ // The window (milestone 3.2): SDL3 on the process's main thread — window, keyboard, game controllers with rumble —
+ // while the game runs on its own thread (boot.c). The picture goes through src/vk/present.c.
+-//  - keyboard: SDL scancodes become the Mac virtual key codes the controller emulation of overrides_input.c (from
+-//    MacNativeGames) expects, so the key layout is theirs (J/K/I/U = A/B/X/Y, WASD + arrows = sticks, ...);
++//  - keyboard: physical SDL scancodes use the saved bindings in keyboard_input.c;
++//  - mouse camera: relative motion drives the right stick; F8 releases/recaptures the cursor;
+ //  - game controllers: buttons by position as on a Switch controller (the right face button is A), sticks with Y up;
+ //  - rumble: the game's vibration values (hid_feedback.c) drive the controller's low / high frequency motors.
+ //  - motion: the controller's gyro and accelerometer feed motion_fusion.c (gyro aiming); F11 / Alt+Enter: fullscreen.
+@@ -13,30 +13,24 @@
+ #include <stdlib.h>
+ 
+ #include "host.h"
++#include "keyboard_input.h"
+ #include "../vk/present.h"
+ 
+ static SDL_Window *window;
+ static SDL_Gamepad *pad;
+ static SDL_Mutex *pad_lock;
+ 
+-static int mac_key(SDL_Scancode s) {
+-    switch (s) {
+-    case SDL_SCANCODE_A: return 0; case SDL_SCANCODE_S: return 1; case SDL_SCANCODE_D: return 2;
+-    case SDL_SCANCODE_F: return 3; case SDL_SCANCODE_H: return 4; case SDL_SCANCODE_G: return 5;
+-    case SDL_SCANCODE_Z: return 6; case SDL_SCANCODE_X: return 7; case SDL_SCANCODE_C: return 8;
+-    case SDL_SCANCODE_V: return 9; case SDL_SCANCODE_B: return 11; case SDL_SCANCODE_Q: return 12;
+-    case SDL_SCANCODE_W: return 13; case SDL_SCANCODE_E: return 14; case SDL_SCANCODE_R: return 15;
+-    case SDL_SCANCODE_Y: return 16; case SDL_SCANCODE_T: return 17; case SDL_SCANCODE_O: return 31;
+-    case SDL_SCANCODE_U: return 32; case SDL_SCANCODE_I: return 34; case SDL_SCANCODE_P: return 35;
+-    case SDL_SCANCODE_L: return 37; case SDL_SCANCODE_J: return 38; case SDL_SCANCODE_K: return 40;
+-    case SDL_SCANCODE_N: return 45; case SDL_SCANCODE_M: return 46; case SDL_SCANCODE_RETURN: return 36;
+-    case SDL_SCANCODE_TAB: return 48; case SDL_SCANCODE_SPACE: return 49; case SDL_SCANCODE_ESCAPE: return 53;
+-    case SDL_SCANCODE_LSHIFT: return 56; case SDL_SCANCODE_RSHIFT: return 60; case SDL_SCANCODE_LALT: return 58;
+-    case SDL_SCANCODE_RALT: return 61; case SDL_SCANCODE_LCTRL: return 59; case SDL_SCANCODE_RCTRL: return 62;
+-    case SDL_SCANCODE_LEFT: return 123; case SDL_SCANCODE_RIGHT: return 124; case SDL_SCANCODE_DOWN: return 125;
+-    case SDL_SCANCODE_UP: return 126;
+-    default: return -1;
++static void mouse_capture(int on) {
++    on = on && keyboard_input_mouse_mode();
++    if (SDL_GetWindowRelativeMouseMode(window) != !!on) {
++        if (!SDL_SetWindowRelativeMouseMode(window, !!on))
++            fprintf(stderr, "[totk-input] cannot %s mouse: %s\n", on ? "capture" : "release", SDL_GetError());
++        SDL_FlushEvent(SDL_EVENT_MOUSE_MOTION);
+     }
++    bool actual = window && SDL_GetWindowRelativeMouseMode(window);
++    mouse_camera_set_capture(actual);
++    runtime_input_mouse_clear();
++    keyboard_input_release_mouse_buttons();
+ }
+ 
+ // Switch npad button bits (libnx HidNpadButton): A B X Y StickL StickR L R ZL ZR Plus Minus Left Up Right Down
+@@ -44,7 +38,7 @@ static int32_t stick(Sint16 v, int invert) {
+     int32_t x = invert ? -(int32_t)v : v;
+     return x > 32767 ? 32767 : x < -32767 ? -32767 : x;
+ }
+-static void pad_update(void) {
++static void pad_update_at(uint64_t event_ns) {
+     RuntimeGamepadState s = {0};
+     if (pad) {
+         static const struct { SDL_GamepadButton b; uint64_t bit; } map[] = {
+@@ -63,9 +57,12 @@ static void pad_update(void) {
+         s.rx = stick(SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX), 0);
+         s.ry = stick(SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY), 1);
+         s.connected = 1;
++        uint64_t ts = event_ns ? event_ns : SDL_GetTicksNS();
++        mouse_camera_offer_stick((float)s.rx / 32767.0f, (float)s.ry / 32767.0f, ts);
+     }
+     runtime_gamepad_set(&s);
+ }
++static void pad_update(void) { pad_update_at(SDL_GetTicksNS()); }
+ 
+ // hid_feedback.c: the game's vibration value for one side (0 left, 1 right). A Switch controller has a low and a high
+ // frequency actuator per side; an SDL controller has a low and a high frequency motor, so each takes the stronger side.
+@@ -84,6 +81,8 @@ void runtime_rumble_set(unsigned side, float amp_low, float freq_low, float amp_
+ 
+ int window_init(void) {
+     SDL_SetMainReady();
++    SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, "0");
++    SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SPEED_SCALE, "1");
+     SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "480");   // 10 ms device buffer at 48 kHz
+     SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON, "1");        // the exe's icon resource (assets/icon.ico via build/ultratears.rc) for the window
+     SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON_SMALL, "1");
+@@ -92,10 +91,62 @@ int window_init(void) {
+         return 0;
+     }
+     pad_lock = SDL_CreateMutex();
+-    window = SDL_CreateWindow("UltraTears", 1280, 720, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
++    int win_w = 1920, win_h = 1080;
++    const char *w_env = getenv("TOTK_WIDTH");
++    const char *h_env = getenv("TOTK_HEIGHT");
++    if (w_env && atoi(w_env) > 0) win_w = atoi(w_env);
++    if (h_env && atoi(h_env) > 0) win_h = atoi(h_env);
++
++    const char *downscale_env = getenv("TOTK_DOWNSCALE");
++    const char *fit_env = getenv("TOTK_FIT_SCREEN");
++    int downscale = (downscale_env && atoi(downscale_env) > 0) || (fit_env && atoi(fit_env) > 0);
++
++    SDL_DisplayID display_id = SDL_GetPrimaryDisplay();
++    const SDL_DisplayMode *dm = SDL_GetCurrentDisplayMode(display_id);
++    int screen_w = dm ? dm->w : 1920, screen_h = dm ? dm->h : 1080;
++
++    const char *mode_env = getenv("TOTK_WINDOW_MODE");
++    int is_borderless = mode_env && !strcmp(mode_env, "borderless");
++    if (downscale || (is_borderless && (win_w > screen_w || win_h > screen_h))) {
++        win_w = screen_w;
++        win_h = screen_h;
++        fprintf(stderr, "[totk] Downscale enabled: window fitted to screen %dx%d (rendering at %sx%s)\n",
++                win_w, win_h, w_env ? w_env : "1920", h_env ? h_env : "1080");
++    }
++
++    window = SDL_CreateWindow("UltraTears", win_w, win_h, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+     if (!window) { fprintf(stderr, "[totk] window: %s\n", SDL_GetError()); return 0; }
+-    if (!vkp_init(window))
+-        runtime_fail("Vulkan initialization failed (Vulkan 1.3 with VK_EXT_shader_object is required)");
++    if (mode_env) {
++        if (!strcmp(mode_env, "fullscreen")) {
++            SDL_DisplayID display = SDL_GetDisplayForWindow(window);
++            SDL_DisplayMode closest;
++            if (SDL_GetClosestFullscreenDisplayMode(display, win_w, win_h, 0.0f, true, &closest)) {
++                SDL_SetWindowFullscreenMode(window, &closest);
++            }
++            SDL_SetWindowFullscreen(window, true);
++            SDL_SyncWindow(window);
++            fprintf(stderr, "[totk] window mode: fullscreen (%dx%d)\n", win_w, win_h);
++        } else if (!strcmp(mode_env, "borderless")) {
++            SDL_SetWindowFullscreenMode(window, NULL);
++            SDL_SetWindowFullscreen(window, true);
++            SDL_SyncWindow(window);
++            fprintf(stderr, "[totk] window mode: borderless\n");
++        } else if (!strcmp(mode_env, "windowed")) {
++            SDL_SetWindowFullscreen(window, false);
++            SDL_SetWindowBordered(window, true);
++            SDL_SetWindowSize(window, win_w, win_h);
++            SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
++            SDL_SyncWindow(window);
++            fprintf(stderr, "[totk] window mode: windowed (%dx%d)\n", win_w, win_h);
++        }
++    } else {
++        SDL_SetWindowSize(window, win_w, win_h);
++        SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
++        SDL_SyncWindow(window);
++    }
++    keyboard_input_init();
++    mouse_capture((SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
++    if (!vkp_init(window)) fprintf(stderr, "[totk] no Vulkan presentation: the game runs without a picture\n");
+     return 1;
+ }
+ 
+@@ -168,7 +219,7 @@ static void title_update(void) {
+     if (now - t0 < 500000000) return;
+     double s = (now - t0) / 1e9;
+     char title[128];
+-    snprintf(title, sizeof title, "UltraTears  |  game %.1f fps  |  shown %.1f fps", (game - game0) / s, (shown - shown0) / s);
++    snprintf(title, sizeof title, "totk-pc-port  |  game %.1f fps  |  shown %.1f fps", (game - game0) / s, (shown - shown0) / s);
+     SDL_SetWindowTitle(window, title);
+     t0 = now; game0 = game; shown0 = shown;
+ }
+@@ -183,28 +234,56 @@ _Noreturn void window_loop(void) {
+                     fprintf(stderr, "[totk] window closed\n");
+                     _Exit(0);
+                 case SDL_EVENT_KEY_DOWN: case SDL_EVENT_KEY_UP: {
++                    if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && e.key.scancode == SDL_SCANCODE_F8) {
++                        if (keyboard_input_mouse_mode()) mouse_capture(!SDL_GetWindowRelativeMouseMode(window));
++                        break;
++                    }
+                     if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat &&
+                         (e.key.scancode == SDL_SCANCODE_F11 ||
+                          (e.key.scancode == SDL_SCANCODE_RETURN && (e.key.mod & SDL_KMOD_ALT)))) {
+                         toggle_fullscreen();
+                         break;
+                     }
+-                    int k = mac_key(e.key.scancode);
+-                    if (k >= 0 && !e.key.repeat) runtime_input_key((unsigned)k, e.type == SDL_EVENT_KEY_DOWN);
++                    if (!e.key.repeat) keyboard_input_key(e.key.scancode, e.type == SDL_EVENT_KEY_DOWN);
++                    break;
++                }
++                case SDL_EVENT_MOUSE_MOTION: {
++                    bool captured = SDL_GetWindowRelativeMouseMode(window);
++                    mouse_camera_set_capture(captured);
++                    if (captured) {
++                        uint64_t ts = e.motion.timestamp ? e.motion.timestamp : SDL_GetTicksNS();
++                        mouse_camera_push_motion((double)e.motion.xrel, (double)e.motion.yrel, ts);
++                        runtime_input_mouse_motion(e.motion.xrel, e.motion.yrel);
++                    }
+                     break;
+                 }
+-                case SDL_EVENT_WINDOW_FOCUS_LOST: runtime_input_clear(); break;
++                case SDL_EVENT_MOUSE_BUTTON_DOWN:
++                    if (keyboard_input_mouse_mode() && !SDL_GetWindowRelativeMouseMode(window)) {
++                        if (e.button.button == SDL_BUTTON_LEFT) mouse_capture(1);
++                        break;   // recapture is not an attack; free-cursor clicks do not drive the game
++                    }
++                    keyboard_input_mouse_button(e.button.button, 1);
++                    break;
++                case SDL_EVENT_MOUSE_BUTTON_UP:
++                    keyboard_input_mouse_button(e.button.button, 0);
++                    break;
++                case SDL_EVENT_WINDOW_FOCUS_LOST: mouse_capture(0); mouse_camera_reset(MOUSE_RESET_FOCUS_LOST); keyboard_input_clear(); break;
++                case SDL_EVENT_WINDOW_FOCUS_GAINED: mouse_capture(1); pad_update(); break;
+                 case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: vkp_resized(); break;
+                 case SDL_EVENT_GAMEPAD_ADDED: open_pad(e.gdevice.which); break;
+                 case SDL_EVENT_GAMEPAD_REMOVED: close_pad(e.gdevice.which); break;
+-                case SDL_EVENT_GAMEPAD_AXIS_MOTION: case SDL_EVENT_GAMEPAD_BUTTON_DOWN: case SDL_EVENT_GAMEPAD_BUTTON_UP:
+-                    pad_update();
++                case SDL_EVENT_GAMEPAD_AXIS_MOTION:
++                    pad_update_at(e.gaxis.timestamp ? e.gaxis.timestamp : SDL_GetTicksNS());
++                    break;
++                case SDL_EVENT_GAMEPAD_BUTTON_DOWN: case SDL_EVENT_GAMEPAD_BUTTON_UP:
++                    pad_update_at(e.gbutton.timestamp ? e.gbutton.timestamp : SDL_GetTicksNS());
+                     break;
+                 case SDL_EVENT_GAMEPAD_SENSOR_UPDATE: pad_sensor(&e.gsensor); break;
+                 default: break;
+                 }
+             } while (SDL_PollEvent(&e));
+         }
++        if (pad) pad_update();
+         title_update();
+     }
+ }
+diff --git a/tools/build_game.py b/tools/build_game.py
+index 9de4c9a..f75560f 100644
+--- a/tools/build_game.py
++++ b/tools/build_game.py
+@@ -29,7 +29,8 @@ TARGETS = {'probe_cpu': ['src/probe/probe_cpu.c'],
+                     'src/host/audio_reverb.c', 'src/host/opus_codec.c', 'src/host/movie_host.c', 'src/host/hid_feedback.c',
+                     'src/host/shared_font.c',
+                     'src/host/window_sdl.c', 'src/vk/vk.c', 'src/vk/present.c', 'src/host/motion_fusion.c',
+-                    'src/host/profiler.c', 'src/host/watch.c']}
++                    'src/host/profiler.c', 'src/host/watch.c',
++                    'src/host/keyboard_input.c', 'src/host/mouse_camera.c', 'src/host/camera_v143.c']}
+ # The graphics front end (MacNativeGames' NVN layer) with its macOS stand-ins: own include paths, own rule
+ GFX = ['src/gfx/nvn/hle_nvn.c', 'src/gfx/nvn/nvn_tex.c', 'src/gfx/nvn/totk_nvn_ext.c', 'src/gfx/nvn/nvn_registry.c',
+        'src/gfx/nvn/nvn_thunks.gen.c', 'src/gfx/nvn/nvn_dirty_win.c', 'src/gfx/nvn/totk_timeline_win.c',
+diff --git a/tools/lifter/camera_patches_v143.py b/tools/lifter/camera_patches_v143.py
+new file mode 100644
+index 0000000..b49cb6e
+--- /dev/null
++++ b/tools/lifter/camera_patches_v143.py
+@@ -0,0 +1,250 @@
++"""Direct mouse camera patches for TOTK 1.4.3 (src/host/camera_v143.c).
++
++Every patch verifies the original 32-bit ARM64 instruction word via expect() before emitting
++the replacement C statement, so lifting any other game version fails loudly.
++"""
++
++
++def expect(gen, addr, word, what):
++    got = gen.word(addr)
++    if got != word:
++        raise SystemExit(f'camera patch {what} at {addr:#x}: expected {word:#010x}, found {got:#010x} (not TOTK 1.4.3?)')
++
++
++def cam_read_stick(gen, addr):
++    """f_800874c1c (0x800874d80): zero processed right stick and set manual-look flags when mouse owns look."""
++    expect(gen, addr, 0xb9041a88, 'cam_read_stick')  # str w8, [x20, #0x418]
++    return '{ extern void totk_camera_v143_on_read_stick(Cpu *); totk_camera_v143_on_read_stick(c); }'
++
++
++def cam_suppress_gyro(gen, addr):
++    """f_800874e6c (0x800874ec0): take native inactive-gyro path (L_800874f10) when mouse owns look."""
++    expect(gen, addr, 0x54000280, 'cam_suppress_gyro')  # b.eq 0x800874f10
++    return ('{ extern int totk_camera_v143_suppress_gyro(void); '
++            'if (totk_camera_v143_suppress_gyro() || COND_EQ(c)) { goto L_800874f10; } }')
++
++
++def cam_switcher_mode(gen, addr):
++    """ExecutePlayerCameraSwitcher::execute (0x800d85e70): record active camera switcher mode enum."""
++    expect(gen, addr, 0xb9002669, 'cam_switcher_mode')  # str w9, [x19, #0x24]
++    return '{ extern void totk_camera_v143_on_switcher_mode(Cpu *); totk_camera_v143_on_switcher_mode(c); }'
++
++
++def cam_mode_pre_calc(gen, addr):
++    """ExecutePlayerCameraBase::execute (0x8002e2340, 0x8002e2430): classify camera context and begin logical camera tick."""
++    expect(gen, addr, 0xf9409108, 'cam_mode_pre_calc')  # ldr x8, [x8, #0x120]
++    return '{ extern void totk_camera_v143_on_mode_pre_calc(Cpu *); totk_camera_v143_on_mode_pre_calc(c); }'
++
++
++def cam_chase_yaw(gen, addr):
++    """ExecutePlayerCameraChase::calc (0x80018ec94): apply direct mouse yaw delta to Chase free-roam camera."""
++    expect(gen, addr, 0xbd004bec, 'cam_chase_yaw')  # str s12, [sp, #0x48]
++    return '{ extern void totk_camera_v143_on_chase_yaw(Cpu *); totk_camera_v143_on_chase_yaw(c); }'
++
++
++def cam_chase_pitch(gen, addr):
++    """ExecutePlayerCameraChase::calc (0x80018edec): apply direct mouse pitch delta to Chase free-roam camera."""
++    expect(gen, addr, 0xbd0047e0, 'cam_chase_pitch')  # str s0, [sp, #0x44]
++    return '{ extern void totk_camera_v143_on_chase_pitch(Cpu *); totk_camera_v143_on_chase_pitch(c); }'
++
++
++def cam_tail_yaw(gen, addr):
++    """ExecutePlayerCameraTail::calc (0x8023d4f34): apply direct mouse yaw delta to tail_cam->yaw_deg."""
++    expect(gen, addr, 0xbd40c260, 'cam_tail_yaw')  # ldr s0, [x19, #0xc0]
++    return '{ extern void totk_camera_v143_on_tail_yaw(Cpu *); totk_camera_v143_on_tail_yaw(c); }'
++
++
++def cam_tail_pitch(gen, addr):
++    """ExecutePlayerCameraTail::calc (0x8023d5028): apply direct mouse pitch delta to tail_cam->pitch_deg."""
++    expect(gen, addr, 0xbd40b661, 'cam_tail_pitch')  # ldr s1, [x19, #0xb4]
++    return '{ extern void totk_camera_v143_on_tail_pitch(Cpu *); totk_camera_v143_on_tail_pitch(c); }'
++
++
++def cam_aim_gyro_branch(gen, addr):
++    """ExecutePlayerCameraAiming::calc (0x8023be9ec): skip gyro aiming branch when mouse owns look."""
++    expect(gen, addr, 0x360002e0, 'cam_aim_gyro_branch')  # tbz w0, #0, 0x8023bea48
++    return ('{ extern int totk_camera_v143_suppress_gyro(void); '
++            'if (totk_camera_v143_suppress_gyro() || ((c->x[0] >> 0) & 1) == 0) { goto L_8023bea48; } }')
++
++
++def cam_aim_pitch_add(gen, addr):
++    """ExecutePlayerCameraAiming::calc (0x8023bebcc): add direct mouse pitch delta before native aiming clamps."""
++    expect(gen, addr, 0x1e202820, 'cam_aim_pitch_add')  # fadd s0, s1, s0
++    return '{ extern void totk_camera_v143_on_aim_pitch_add(Cpu *); totk_camera_v143_on_aim_pitch_add(c); }'
++
++
++def cam_aim_pitch_commit(gen, addr):
++    """ExecutePlayerCameraAiming::calc (0x8023bec3c): bypass stick spring damper on pitch when mouse owns look."""
++    expect(gen, addr, 0x97774b4d, 'cam_aim_pitch_commit')  # bl 0x800191970
++    return ('{ extern int totk_camera_v143_on_aim_pitch_commit(Cpu *); '
++            'extern void f_800191970(Cpu *); '
++            'if (!totk_camera_v143_on_aim_pitch_commit(c)) { c->x[30] = 0x8023bec40ull; f_800191970(c); } }')
++
++
++def cam_aim_yaw(gen, addr):
++    """ExecutePlayerCameraAiming::calc (0x8023beeec): add direct mouse yaw delta before native wrap & store."""
++    expect(gen, addr, 0xbc5b83a1, 'cam_aim_yaw')  # ldur s1, [x29, #-0x48]
++    return '{ extern void totk_camera_v143_on_aim_yaw(Cpu *); totk_camera_v143_on_aim_yaw(c); }'
++
++
++def cam_scope_gyro_branch(gen, addr):
++    """ExecutePlayerCameraAimingTelescope::calc (0x8023c0944): skip gyro scope branch when mouse owns look."""
++    expect(gen, addr, 0x54000501, 'cam_scope_gyro_branch')  # b.ne 0x8023c09e4
++    return ('{ extern int totk_camera_v143_suppress_gyro(void); '
++            'if (totk_camera_v143_suppress_gyro() || COND_NE(c)) { goto L_8023c09e4; } }')
++
++
++def cam_scope_pitch_load(gen, addr):
++    """ExecutePlayerCameraAimingTelescope::calc (0x8023c0b00): add direct mouse pitch delta before native clamp."""
++    expect(gen, addr, 0xbd416260, 'cam_scope_pitch_load')  # ldr s0, [x19, #0x160]
++    return '{ extern void totk_camera_v143_on_scope_pitch_load(Cpu *); totk_camera_v143_on_scope_pitch_load(c); }'
++
++
++def cam_scope_pitch_commit(gen, addr):
++    """ExecutePlayerCameraAimingTelescope::calc (0x8023c0b78): commit clamped pitch without stick damping."""
++    expect(gen, addr, 0xbd405260, 'cam_scope_pitch_commit')  # ldr s0, [x19, #0x50]
++    return '{ extern void totk_camera_v143_on_scope_pitch_commit(Cpu *); totk_camera_v143_on_scope_pitch_commit(c); }'
++
++
++def cam_scope_yaw(gen, addr):
++    """ExecutePlayerCameraAimingTelescope::calc (0x8023c0e80): add direct mouse yaw delta before native wrap."""
++    expect(gen, addr, 0xbd405be1, 'cam_scope_yaw')  # ldr s1, [sp, #0x58]
++    return '{ extern void totk_camera_v143_on_scope_yaw(Cpu *); totk_camera_v143_on_scope_yaw(c); }'
++
++
++def cam_finder_gyro_flag(gen, addr):
++    """ExecutePlayerCameraCameraFinder::calc (0x8023c276c): force non-gyro flag w23=1 when mouse owns look."""
++    expect(gen, addr, 0x52000017, 'cam_finder_gyro_flag')  # eor w23, w0, #1
++    return ('{ extern int totk_camera_v143_suppress_gyro(void); '
++            'c->x[23] = totk_camera_v143_suppress_gyro() ? 1u : (uint32_t)((uint32_t)c->x[0] ^ 0x1ull); }')
++
++
++def cam_finder_pitch(gen, addr):
++    """ExecutePlayerCameraCameraFinder::calc (0x8023c28c4): add direct mouse pitch delta before Min/MaxPitch clamp."""
++    expect(gen, addr, 0xbd005260, 'cam_finder_pitch')  # str s0, [x19, #0x50]
++    return '{ extern void totk_camera_v143_on_finder_pitch(Cpu *); totk_camera_v143_on_finder_pitch(c); }'
++
++
++def cam_finder_yaw(gen, addr):
++    """ExecutePlayerCameraCameraFinder::calc (0x8023c2df0): add direct mouse yaw delta before native wrap."""
++    expect(gen, addr, 0xbd404be1, 'cam_finder_yaw')  # ldr s1, [sp, #0x48]
++    return '{ extern void totk_camera_v143_on_finder_yaw(Cpu *); totk_camera_v143_on_finder_yaw(c); }'
++
++
++def cam_special_gyro_branch(gen, addr):
++    """ExecutePlayerCameraSpecialPower::calc (0x8023d2e24): skip gyro branch when mouse owns look."""
++    expect(gen, addr, 0x360004e0, 'cam_special_gyro_branch')  # tbz w0, #0, 0x8023d2ec0
++    return ('{ extern int totk_camera_v143_suppress_gyro(void); '
++            'if (totk_camera_v143_suppress_gyro() || ((c->x[0] >> 0) & 1) == 0) { goto L_8023d2ec0; } }')
++
++
++def cam_special_pitch_load(gen, addr):
++    """ExecutePlayerCameraSpecialPower::calc (0x8023d3158): add direct mouse pitch delta before native clamp."""
++    expect(gen, addr, 0xbd416260, 'cam_special_pitch_load')  # ldr s0, [x19, #0x160]
++    return '{ extern void totk_camera_v143_on_special_pitch_load(Cpu *); totk_camera_v143_on_special_pitch_load(c); }'
++
++
++def cam_special_pitch_commit(gen, addr):
++    """ExecutePlayerCameraSpecialPower::calc (0x8023d31d0): commit clamped pitch without stick damping."""
++    expect(gen, addr, 0xbd405a60, 'cam_special_pitch_commit')  # ldr s0, [x19, #0x58]
++    return '{ extern void totk_camera_v143_on_special_pitch_commit(Cpu *); totk_camera_v143_on_special_pitch_commit(c); }'
++
++
++def cam_special_yaw(gen, addr):
++    """ExecutePlayerCameraSpecialPower::calc (0x8023d34cc): add direct mouse yaw delta before native wrap."""
++    expect(gen, addr, 0xbc5b03a1, 'cam_special_yaw')  # ldur s1, [x29, #-0x50]
++    return '{ extern void totk_camera_v143_on_special_yaw(Cpu *); totk_camera_v143_on_special_yaw(c); }'
++
++
++def cam_climb_yaw(gen, addr):
++    """ExecutePlayerCameraClimbObj::calc (0x8023c3bd8): apply direct mouse yaw delta."""
++    expect(gen, addr, 0xbd409261, 'cam_climb_yaw')  # ldr s1, [x19, #0x90]
++    return '{ extern void totk_camera_v143_on_climb_yaw(Cpu *); totk_camera_v143_on_climb_yaw(c); }'
++
++
++def cam_climb_pitch(gen, addr):
++    """ExecutePlayerCameraClimbObj::calc (0x8023c3c10): apply direct mouse pitch delta."""
++    expect(gen, addr, 0xbd409e61, 'cam_climb_pitch')  # ldr s1, [x19, #0x9c]
++    return '{ extern void totk_camera_v143_on_climb_pitch(Cpu *); totk_camera_v143_on_climb_pitch(c); }'
++
++
++def cam_surf_yaw(gen, addr):
++    """ExecutePlayerCameraShieldSurfing::calc (0x8023d0564): apply direct mouse yaw delta."""
++    expect(gen, addr, 0xbd40f661, 'cam_surf_yaw')  # ldr s1, [x19, #0xf4]
++    return '{ extern void totk_camera_v143_on_surf_yaw(Cpu *); totk_camera_v143_on_surf_yaw(c); }'
++
++
++def cam_surf_pitch(gen, addr):
++    """ExecutePlayerCameraShieldSurfing::calc (0x8023d0584): apply direct mouse pitch delta."""
++    expect(gen, addr, 0xbd410260, 'cam_surf_pitch')  # ldr s0, [x19, #0x100]
++    return '{ extern void totk_camera_v143_on_surf_pitch(Cpu *); totk_camera_v143_on_surf_pitch(c); }'
++
++
++def cam_wake_yaw(gen, addr):
++    """ExecutePlayerCameraWakeboard::calc (0x8023daad0): apply direct mouse yaw delta."""
++    expect(gen, addr, 0xbd40f261, 'cam_wake_yaw')  # ldr s1, [x19, #0xf0]
++    return '{ extern void totk_camera_v143_on_wake_yaw(Cpu *); totk_camera_v143_on_wake_yaw(c); }'
++
++
++def cam_wake_pitch(gen, addr):
++    """ExecutePlayerCameraWakeboard::calc (0x8023dab30): apply direct mouse pitch delta."""
++    expect(gen, addr, 0x2d5f8660, 'cam_wake_pitch')  # ldp s0, s1, [x19, #0xfc]
++    return '{ extern void totk_camera_v143_on_wake_pitch(Cpu *); totk_camera_v143_on_wake_pitch(c); }'
++
++
++def cam_horse_yaw(gen, addr):
++    """ExecutePlayerCameraHorse::calc (0x8023caa38): apply direct mouse yaw delta."""
++    expect(gen, addr, 0xbd40b661, 'cam_horse_yaw')  # ldr s1, [x19, #0xb4]
++    return '{ extern void totk_camera_v143_on_horse_yaw(Cpu *); totk_camera_v143_on_horse_yaw(c); }'
++
++
++def cam_horse_pitch(gen, addr):
++    """ExecutePlayerCameraHorse::calc (0x8023caaac): apply direct mouse pitch delta."""
++    expect(gen, addr, 0xbd40ae61, 'cam_horse_pitch')  # ldr s1, [x19, #0xac]
++    return '{ extern void totk_camera_v143_on_horse_pitch(Cpu *); totk_camera_v143_on_horse_pitch(c); }'
++
++
++def cam_player_calc_fallback(gen, addr):
++    """PlayerCamera::calc (0x8007156c0): fallback direct spherical rotation before f_800717668 and collision."""
++    expect(gen, addr, 0x940007ea, 'cam_player_calc_fallback')  # bl 0x800717668
++    return ('{ extern void totk_camera_v143_on_player_cam_calc(Cpu *); '
++            'extern void f_800717668(Cpu *); '
++            'totk_camera_v143_on_player_cam_calc(c); '
++            'c->x[30] = 0x8007156c4ull; f_800717668(c); }')
++
++
++CAMERA_PATCHES_V143 = {
++    0x800874d80: cam_read_stick,
++    0x800874ec0: cam_suppress_gyro,
++    0x800d85e70: cam_switcher_mode,
++    0x8002e2340: cam_mode_pre_calc,
++    0x8002e2430: cam_mode_pre_calc,
++    0x80018ec94: cam_chase_yaw,
++    0x80018edec: cam_chase_pitch,
++    0x8023d4f34: cam_tail_yaw,
++    0x8023d5028: cam_tail_pitch,
++    0x8023be9ec: cam_aim_gyro_branch,
++    0x8023bebcc: cam_aim_pitch_add,
++    0x8023bec3c: cam_aim_pitch_commit,
++    0x8023beeec: cam_aim_yaw,
++    0x8023c0944: cam_scope_gyro_branch,
++    0x8023c0b00: cam_scope_pitch_load,
++    0x8023c0b78: cam_scope_pitch_commit,
++    0x8023c0e80: cam_scope_yaw,
++    0x8023c276c: cam_finder_gyro_flag,
++    0x8023c28c4: cam_finder_pitch,
++    0x8023c2df0: cam_finder_yaw,
++    0x8023d2e24: cam_special_gyro_branch,
++    0x8023d3158: cam_special_pitch_load,
++    0x8023d31d0: cam_special_pitch_commit,
++    0x8023d34cc: cam_special_yaw,
++    0x8023c3bd8: cam_climb_yaw,
++    0x8023c3c10: cam_climb_pitch,
++    0x8023d0564: cam_surf_yaw,
++    0x8023d0584: cam_surf_pitch,
++    0x8023daad0: cam_wake_yaw,
++    0x8023dab30: cam_wake_pitch,
++    0x8023caa38: cam_horse_yaw,
++    0x8023caaac: cam_horse_pitch,
++    0x8007156c0: cam_player_calc_fallback,
++}
+diff --git a/tools/lifter/gen.py b/tools/lifter/gen.py
+index 705b0fc..2004b42 100644
+--- a/tools/lifter/gen.py
++++ b/tools/lifter/gen.py
+@@ -128,6 +128,13 @@ class Module:
+         if r is not None and s is not None:
+             self.stats['jumptables_single_target_rescanned'] += 1
+             return sorted(set(r) | set(s))
++        if s is None and r is not None and len(set(r)) <= 1:
++            # [TOTK] A single target the image scan cannot confirm comes from an emulation that read the table at a
++            # scratch address: the table register is set once, far above the br, and reused in between (main 0x8006eb84c,
++            # the save-load crash "no function at 8006eb850": 1 of its 7 targets). Every instruction of the function is
++            # a target then ('all', as for any unresolved table) instead of that one guess. 3 brs in main.
++            self.stats['jumptables_single_unconfirmed'] += 1
++            return None
+         return r if r is not None else s
+ 
+     def _jump_table_scan(self, br_pc, entry, end):
+diff --git a/tools/lifter/patches.py b/tools/lifter/patches.py
+index 32e04eb..e04cc0d 100644
+--- a/tools/lifter/patches.py
++++ b/tools/lifter/patches.py
+@@ -24,6 +24,10 @@ def drs_off(gen, addr):
+             'if (!totk_drs_enabled() || ((c->x[8] >> 0) & 1) == 0) { goto L_800584c3c; } }')
+ 
+ 
++from camera_patches_v143 import CAMERA_PATCHES_V143
++
++
+ PATCHES = {
+     0x8005843e0: drs_off,
++    **CAMERA_PATCHES_V143,
+ }
+diff --git a/tools/pack_shaders.py b/tools/pack_shaders.py
+new file mode 100644
+index 0000000..8b136d5
+--- /dev/null
++++ b/tools/pack_shaders.py
+@@ -0,0 +1,62 @@
++"""Pack the translated shaders into one file: <dir>/shaders.pack, read by src/gfx/vkb_shader.c.
++
++usage: python tools/pack_shaders.py [<dir>]   (default data\\shaders\\ryujinx)
++
++The translation writes two files per shader, <key>.spv and <key>.res.json (~57,000 files for 1.4.3); the game reads
++the pack first and falls back to them. The loose files stay: the next translation run (--new-only) adds to them, and
++the pack is written again. Layout, little-endian: b'UTSHPK01', u32 count, u32 0, then count entries sorted by key
++{key[32] (the SHA-256), u64 offset, u32 SPIR-V bytes, u32 reflection bytes}, then the data (each SPIR-V followed by
++its reflection).
++"""
++import os
++import pathlib
++import re
++import struct
++import sys
++
++MAGIC = b'UTSHPK01'
++KEY = re.compile(r'[0-9a-f]{64}')
++
++
++def pack(folder, out=None):
++    folder = pathlib.Path(folder)
++    out = pathlib.Path(out) if out else folder / 'shaders.pack'
++    keys = sorted(p.stem for p in folder.glob('*.spv')
++                  if KEY.fullmatch(p.stem) and (folder / f'{p.stem}.res.json').is_file())
++    tmp = out.with_name(out.name + '.tmp')
++    offset = 16 + 48 * len(keys)
++    index = []
++    with open(tmp, 'wb') as f:
++        f.write(MAGIC + struct.pack('<II', len(keys), 0))
++        f.write(bytes(48 * len(keys)))   # the index, written once the offsets are known
++        for key in keys:
++            spv = (folder / f'{key}.spv').read_bytes()
++            refl = (folder / f'{key}.res.json').read_bytes()
++            f.write(spv)
++            f.write(refl)
++            index.append(bytes.fromhex(key) + struct.pack('<QII', offset, len(spv), len(refl)))
++            offset += len(spv) + len(refl)
++        f.seek(16)
++        f.write(b''.join(index))
++    os.replace(tmp, out)
++    return len(keys), offset
++
++
++def stale(folder, out=None):
++    """True if the pack is missing or older than a translated shader (the translation added or rewrote one)."""
++    folder = pathlib.Path(folder)
++    out = pathlib.Path(out) if out else folder / 'shaders.pack'
++    if not out.is_file():
++        return True
++    t = out.stat().st_mtime
++    return any(e.stat().st_mtime > t for e in os.scandir(folder) if e.name.endswith(('.spv', '.res.json')))
++
++
++def main():
++    folder = sys.argv[1] if len(sys.argv) > 1 else 'data/shaders/ryujinx'
++    n, size = pack(folder)
++    print(f'{n} shaders packed into {pathlib.Path(folder) / "shaders.pack"} ({size / 2**20:.0f} MiB)')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tools/setup.py b/tools/setup.py
+index a78f411..41b3e9c 100644
+--- a/tools/setup.py
++++ b/tools/setup.py
+@@ -392,6 +392,10 @@ def step_shaders(dump, state, cpus):
+     run([sys.executable, 'tools/run_ryujinx_xlate.py', out, '--workers', min(cpus, 32), '--quiet'] + new_only,
+         'translating the shaders')
+     state['shaders-xlate'] = xlate
++    from pack_shaders import pack, stale   # one file instead of two per shader (src/gfx/vkb_shader.c reads it first)
++    if stale(out / 'ryujinx'):
++        n, size = pack(out / 'ryujinx')
++        say(f'  {n} shaders packed into data\\shaders\\ryujinx\\shaders.pack ({size / 2**20:.0f} MiB)')
+     return 'done'
+ 
+ 
+diff --git a/tools/test_camera_v143.py b/tools/test_camera_v143.py
+new file mode 100644
+index 0000000..92a1f10
+--- /dev/null
++++ b/tools/test_camera_v143.py
+@@ -0,0 +1,732 @@
++"""Unit tests for TOTK 1.4.3 camera adapter (src/host/camera_v143.c) and lifter patches (camera_patches_v143.py)."""
++import pathlib
++import subprocess
++import sys
++import tempfile
++import unittest
++
++ROOT = pathlib.Path(__file__).resolve().parent.parent
++sys.path.insert(0, str(ROOT / "tools"))
++sys.path.insert(0, str(ROOT / "tools" / "lifter"))
++from toolchain import CLANG64, LINUX_TOOLS, env as tool_env  # noqa: E402
++from camera_patches_v143 import CAMERA_PATCHES_V143  # noqa: E402
++
++COMPILER = LINUX_TOOLS["clang"] if sys.platform == "linux" else CLANG64 / "clang.exe"
++
++HARNESS_C = r'''
++#include <assert.h>
++#include <math.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include "camera_v143.h"
++#include "cpu.h"
++
++volatile int g_fnprof = 0;
++void fnprof_hit(uint64_t a, uint64_t b, uint64_t c) {
++    (void)a;
++    (void)b;
++    (void)c;
++}
++
++static uint32_t f2u32(float v) {
++    uint32_t u;
++    memcpy(&u, &v, 4);
++    return u;
++}
++
++static float u32f(uint32_t u) {
++    float v;
++    memcpy(&v, &u, 4);
++    return v;
++}
++
++static void check_near(float actual, float expected, float eps, const char *msg) {
++    if (fabsf(actual - expected) > eps) {
++        fprintf(stderr, "FAIL %s: actual=%.6f expected=%.6f\n", msg, actual, expected);
++        exit(1);
++    }
++}
++
++static void reset_mouse_cam(void) {
++    MouseCameraConfig cfg = {
++        .version = 2,
++        .mouse_mode = 1,
++        .backend = MOUSE_BACKEND_NATIVE,
++        .look_deg_per_count = 0.04,
++        .aim_multiplier = 1.0,
++        .scope_multiplier = 1.0,
++        .smooth_ms = 0,
++        .invert_y = 0,
++        .legacy_sensitivity = 1.0f,
++        .trace_enabled = 0,
++    };
++    mouse_camera_configure(&cfg);
++    mouse_camera_set_capture(true);
++    totk_camera_v143_reset_state();
++}
++
++static void test_context_classification(void) {
++    bool mw = false, lo = false, uh = false, vh = false;
++
++    const uint64_t free_roam_addrs[] = {
++        TOTK_V143_CALC_CHASE,
++        TOTK_V143_CALC_TAIL,
++        TOTK_V143_CALC_CLIMB_OBJ,
++        TOTK_V143_CALC_WATERFALL_CLIMB,
++        TOTK_V143_CALC_SHIELD_SURFING,
++        TOTK_V143_CALC_WAKEBOARD,
++        TOTK_V143_CALC_ABYSS,
++    };
++    for (size_t i = 0; i < sizeof(free_roam_addrs) / sizeof(free_roam_addrs[0]); i++) {
++        CameraContext ctx = totk_camera_v143_classify_context(free_roam_addrs[i], false, &mw, &lo, &uh, &vh);
++        assert(ctx == CAMERA_CTX_FREE_ROAM);
++    }
++
++    assert(totk_camera_v143_classify_context(TOTK_V143_CALC_SPECIAL_POWER, false, &mw, &lo, &uh, &vh) == CAMERA_CTX_ULTRAHAND_LOOK);
++    assert(!uh);
++
++    assert(totk_camera_v143_classify_context(TOTK_V143_CALC_AIMING, false, &mw, &lo, &uh, &vh) == CAMERA_CTX_AIM);
++    assert(totk_camera_v143_classify_context(TOTK_V143_CALC_AIMING_TELESCOPE, false, &mw, &lo, &uh, &vh) == CAMERA_CTX_SCOPE);
++    assert(totk_camera_v143_classify_context(TOTK_V143_CALC_CAMERA_FINDER, false, &mw, &lo, &uh, &vh) == CAMERA_CTX_SCOPE);
++
++    assert(totk_camera_v143_classify_context(TOTK_V143_CALC_LOCKON_TARGET, false, &mw, &lo, &uh, &vh) == CAMERA_CTX_LOCK_ON);
++    assert(lo);
++    assert(totk_camera_v143_classify_context(TOTK_V143_CALC_LOCKON_AIMING_AT, false, &mw, &lo, &uh, &vh) == CAMERA_CTX_LOCK_ON);
++    assert(lo);
++
++    assert(totk_camera_v143_classify_context(TOTK_V143_CALC_TAIL, true, &mw, &lo, &uh, &vh) == CAMERA_CTX_MENU_WHEEL);
++    assert(mw);
++
++    assert(totk_camera_v143_classify_context(TOTK_V143_CALC_ULTRAHAND, false, &mw, &lo, &uh, &vh) == CAMERA_CTX_ULTRAHAND_OBJECT);
++    assert(uh);
++    assert(totk_camera_v143_classify_context(TOTK_V143_CALC_SPECIAL_POWER, true, &mw, &lo, &uh, &vh) == CAMERA_CTX_ULTRAHAND_OBJECT);
++    assert(uh);
++
++    assert(totk_camera_v143_classify_context(TOTK_V143_CALC_HORSE, false, &mw, &lo, &uh, &vh) == CAMERA_CTX_VEHICLE);
++    assert(vh);
++    assert(totk_camera_v143_classify_context(TOTK_V143_CALC_HORSE_REVOLVE, false, &mw, &lo, &uh, &vh) == CAMERA_CTX_VEHICLE);
++    assert(!vh);
++    assert(totk_camera_v143_classify_context(TOTK_V143_CALC_HORSE_LOCKON_EMPTY, false, &mw, &lo, &uh, &vh) == CAMERA_CTX_VEHICLE);
++    assert(!vh);
++
++    assert(totk_camera_v143_classify_context(0x8023c4704ull, false, &mw, &lo, &uh, &vh) == CAMERA_CTX_DISABLED);
++    assert(totk_camera_v143_classify_context(0x8023c222cull, false, &mw, &lo, &uh, &vh) == CAMERA_CTX_DISABLED);
++    assert(totk_camera_v143_classify_context(0x809999990ull, false, &mw, &lo, &uh, &vh) == CAMERA_CTX_UNCLASSIFIED);
++}
++
++static void test_chase_camera_direct_rotation(void) {
++    reset_mouse_cam();
++    Cpu cpu;
++    memset(&cpu, 0, sizeof(cpu));
++    uint8_t p_ctrl_buf[0x800];
++    uint8_t mode_buf[0x400];
++    uint8_t vt_buf[0x200];
++    uint8_t stack_buf[0x200];
++    memset(p_ctrl_buf, 0, sizeof(p_ctrl_buf));
++    memset(mode_buf, 0, sizeof(mode_buf));
++    memset(vt_buf, 0, sizeof(vt_buf));
++    memset(stack_buf, 0, sizeof(stack_buf));
++
++    uint64_t p_ctrl = (uint64_t)(uintptr_t)p_ctrl_buf;
++    uint64_t cam_mode = (uint64_t)(uintptr_t)mode_buf;
++    uint64_t vtable = (uint64_t)(uintptr_t)vt_buf;
++    uint64_t sp_base = (uint64_t)(uintptr_t)(stack_buf + 0x80);
++
++    ST64(vtable + 0x120ull, TOTK_V143_CALC_CHASE);
++    ST32(p_ctrl + 0x35cull, f2u32(50.0f));
++    /* p_ctrl+0x148 bit 1 (0x02) is set during normal Chase camera mode and MUST NOT block mouse look */
++    ST8(p_ctrl + 0x148ull, 0x02u);
++    ST32(p_ctrl + 0x410ull, f2u32(-12.0f));
++    ST32(p_ctrl + 0x414ull, f2u32(25.0f));
++    ST32(cam_mode + 0xf8ull, f2u32(-70.0f));
++    ST32(cam_mode + 0xfcull, f2u32(80.0f));
++    ST32(cam_mode + 0x180ull, 3u); /* sub_state 3 (normal chase follow) */
++
++    cpu.x[20] = p_ctrl;
++    cpu.x[21] = 0; /* cam_input_flags bit 0 == 0 (not blocked) */
++    cpu.x[8] = 0x28;
++    totk_camera_v143_on_read_stick(&cpu);
++
++    mouse_camera_push_motion(100.0, -50.0, 1500000ull);
++
++    cpu.x[19] = cam_mode;
++    cpu.x[22] = p_ctrl;
++    cpu.x[8] = vtable;
++    totk_camera_v143_on_mode_pre_calc(&cpu);
++    assert(cpu.x[8] == TOTK_V143_CALC_CHASE);
++
++    /* Simulate ExecutePlayerCameraChase::calc prologue storing p_ctrl+0x410/0x414 to sp+0x44/0x48,
++     * followed by sub_state 3 attempting to auto-orbit v12 to 99.0f and slope-pull v0 to 0.0f. */
++    cpu.sp = sp_base;
++    cpu.x[20] = cam_mode;
++    cpu.x[26] = p_ctrl;
++    cpu.x[23] = 1ull;
++    ST32(sp_base + 0x44ull, f2u32(-12.0f));
++    ST32(sp_base + 0x48ull, f2u32(25.0f));
++    ST32(sp_base + 0x4cull, f2u32(25.0f));
++    cpu.v[12] = f2u32(99.0f); /* unwanted auto-orbit yaw */
++    totk_camera_v143_on_chase_yaw(&cpu);
++
++    cpu.v[0] = f2u32(0.0f); /* unwanted auto-pitch reset */
++    totk_camera_v143_on_chase_pitch(&cpu);
++
++    float expected_yaw = 25.0f - (100.0f * 0.04f);
++    float expected_pitch = -12.0f - (50.0f * 0.04f);
++    check_near(u32f(LD32(sp_base + 0x48ull)), expected_yaw, 1e-4f, "chase sp+0x48 yaw");
++    check_near(u32f(LD32(cam_mode + 0x120ull)), expected_yaw, 1e-4f, "chase cam_mode+0x120 yaw");
++    check_near(u32f(LD32(p_ctrl + 0x414ull)), expected_yaw, 1e-4f, "chase p_ctrl+0x414 yaw");
++    assert(cpu.x[23] == 0ull);
++    assert((LD32(p_ctrl + 0x5c0ull) & 1u) == 1u);
++
++    check_near(u32f(LD32(sp_base + 0x44ull)), expected_pitch, 1e-4f, "chase sp+0x44 pitch");
++    check_near(u32f(LD32(cam_mode + 0x108ull)), expected_pitch, 1e-4f, "chase cam_mode+0x108 pitch");
++    check_near(u32f(LD32(p_ctrl + 0x410ull)), expected_pitch, 1e-4f, "chase p_ctrl+0x410 pitch");
++
++    MouseCameraDiag diag;
++    mouse_camera_get_diag(&diag);
++    assert(diag.applied_count == 1);
++    assert(diag.unapplied_count == 0);
++}
++
++static void test_tail_camera_direct_rotation(void) {
++    reset_mouse_cam();
++    Cpu cpu;
++    memset(&cpu, 0, sizeof(cpu));
++    uint8_t p_ctrl_buf[0x800];
++    uint8_t mode_buf[0x400];
++    uint8_t vt_buf[0x200];
++    memset(p_ctrl_buf, 0, sizeof(p_ctrl_buf));
++    memset(mode_buf, 0, sizeof(mode_buf));
++    memset(vt_buf, 0, sizeof(vt_buf));
++
++    uint64_t p_ctrl = (uint64_t)(uintptr_t)p_ctrl_buf;
++    uint64_t cam_mode = (uint64_t)(uintptr_t)mode_buf;
++    uint64_t vtable = (uint64_t)(uintptr_t)vt_buf;
++
++    ST64(vtable + 0x120ull, TOTK_V143_CALC_TAIL);
++    ST32(p_ctrl + 0x35cull, f2u32(50.0f));
++    ST32(p_ctrl + 0x420ull, f2u32(0.75f));
++    ST32(p_ctrl + 0x424ull, f2u32(-0.50f));
++    ST32(cam_mode + 0xc0ull, f2u32(10.0f));
++    ST32(cam_mode + 0xb4ull, f2u32(-15.0f));
++
++    cpu.x[20] = p_ctrl;
++    cpu.x[21] = 0;
++    cpu.x[8] = 0x28;
++    totk_camera_v143_on_read_stick(&cpu);
++    assert(u32f(LD32(p_ctrl + 0x420ull)) == 0.0f);
++    assert(u32f(LD32(p_ctrl + 0x424ull)) == 0.0f);
++    assert((LD32(p_ctrl + 0x418ull) & 0x28u) == 0);
++    assert(totk_camera_v143_suppress_gyro() == 1);
++
++    mouse_camera_push_motion(100.0, -50.0, 1000000ull);
++
++    cpu.x[19] = cam_mode;
++    cpu.x[22] = p_ctrl;
++    cpu.x[8] = vtable;
++    totk_camera_v143_on_mode_pre_calc(&cpu);
++    assert(cpu.x[8] == TOTK_V143_CALC_TAIL);
++
++    totk_camera_v143_on_tail_yaw(&cpu);
++    totk_camera_v143_on_tail_pitch(&cpu);
++
++    check_near(u32f(LD32(cam_mode + 0xc0ull)), 10.0f - (100.0f * 0.04f), 1e-4f, "tail yaw");
++    check_near(u32f(LD32(cam_mode + 0xb4ull)), -15.0f - (50.0f * 0.04f), 1e-4f, "tail pitch");
++
++    MouseCameraDiag diag;
++    mouse_camera_get_diag(&diag);
++    assert(diag.applied_count == 1);
++    assert(diag.unapplied_count == 0);
++
++    /* Fallback in PlayerCamera::calc must NOT double-apply */
++    cpu.x[21] = p_ctrl;
++    totk_camera_v143_on_player_cam_calc(&cpu);
++    mouse_camera_get_diag(&diag);
++    assert(diag.applied_count == 1);
++}
++
++static void test_aim_scope_and_fallback_spherical(void) {
++    reset_mouse_cam();
++    Cpu cpu;
++    memset(&cpu, 0, sizeof(cpu));
++    uint8_t p_ctrl_buf[0x800];
++    uint8_t mode_buf[0x400];
++    uint8_t vt_buf[0x200];
++    uint8_t stack_buf[0x200];
++    memset(p_ctrl_buf, 0, sizeof(p_ctrl_buf));
++    memset(mode_buf, 0, sizeof(mode_buf));
++    memset(vt_buf, 0, sizeof(vt_buf));
++    memset(stack_buf, 0, sizeof(stack_buf));
++
++    uint64_t p_ctrl = (uint64_t)(uintptr_t)p_ctrl_buf;
++    uint64_t cam_mode = (uint64_t)(uintptr_t)mode_buf;
++    uint64_t vtable = (uint64_t)(uintptr_t)vt_buf;
++    uint64_t sp_base = (uint64_t)(uintptr_t)(stack_buf + 0x100);
++
++    /* Aiming at zoomed vFOV = 25 deg */
++    ST64(vtable + 0x120ull, TOTK_V143_CALC_AIMING);
++    ST32(p_ctrl + 0x35cull, f2u32(25.0f));
++    ST32(sp_base - 72ull, f2u32(0.0f));
++
++    mouse_camera_push_motion(100.0, -50.0, 2000000ull);
++    cpu.x[19] = cam_mode;
++    cpu.x[22] = p_ctrl;
++    cpu.x[29] = sp_base;
++    cpu.x[8] = vtable;
++    totk_camera_v143_on_mode_pre_calc(&cpu);
++
++    cpu.v[1] = f2u32(0.0f);
++    cpu.v[0] = f2u32(0.0f);
++    totk_camera_v143_on_aim_pitch_add(&cpu);
++    float pitch_out = u32f((uint32_t)cpu.v[0]);
++    float fov_scale = (float)(tan(12.5 * 3.14159265358979323846 / 180.0) / tan(25.0 * 3.14159265358979323846 / 180.0));
++    check_near(pitch_out, -(50.0f * 0.04f * fov_scale), 1e-4f, "aim pitch");
++
++    ST32(cam_mode + 0x154ull, f2u32(pitch_out));
++    int committed = totk_camera_v143_on_aim_pitch_commit(&cpu);
++    assert(committed == 1);
++    check_near(u32f(LD32(cam_mode + 0x15cull)), pitch_out, 1e-4f, "aim pitch commit");
++
++    totk_camera_v143_on_aim_yaw(&cpu);
++    check_near(u32f(LD32(sp_base - 72ull)), -(100.0f * 0.04f * fov_scale), 1e-4f, "aim yaw");
++
++    /* Scope (AimingTelescope 0x8023c08ac) at zoomed vFOV = 20 deg */
++    ST64(vtable + 0x120ull, TOTK_V143_CALC_AIMING_TELESCOPE);
++    ST32(p_ctrl + 0x35cull, f2u32(20.0f));
++    ST32(cam_mode + 0x160ull, f2u32(5.0f));
++    ST32(cam_mode + 0x50ull, f2u32(5.0f));
++    ST32(cam_mode + 0x58ull, f2u32(1.5f));
++    ST32(sp_base + 0x58ull, f2u32(12.0f));
++
++    mouse_camera_push_motion(100.0, -50.0, 2500000ull);
++    cpu.x[19] = cam_mode;
++    cpu.x[22] = p_ctrl;
++    cpu.sp = sp_base;
++    cpu.x[8] = vtable;
++    totk_camera_v143_on_mode_pre_calc(&cpu);
++
++    float scope_fov_scale = (float)(tan(10.0 * 3.14159265358979323846 / 180.0) / tan(25.0 * 3.14159265358979323846 / 180.0));
++    totk_camera_v143_on_scope_pitch_load(&cpu);
++    float expected_scope_pitch = 5.0f - (50.0f * 0.04f * scope_fov_scale);
++    check_near(u32f(LD32(cam_mode + 0x160ull)), expected_scope_pitch, 1e-4f, "scope pitch load");
++    totk_camera_v143_on_scope_pitch_commit(&cpu);
++    check_near(u32f(LD32(cam_mode + 0x50ull)), expected_scope_pitch, 1e-4f, "scope pitch commit");
++    check_near(u32f(LD32(cam_mode + 0x58ull)), 0.0f, 1e-6f, "scope pitch vel zero");
++    totk_camera_v143_on_scope_yaw(&cpu);
++    check_near(u32f(LD32(sp_base + 0x58ull)), 12.0f - (100.0f * 0.04f * scope_fov_scale), 1e-4f, "scope yaw");
++
++    /* CameraFinder (0x8023c26c8) at vFOV = 25 deg */
++    ST64(vtable + 0x120ull, TOTK_V143_CALC_CAMERA_FINDER);
++    ST32(p_ctrl + 0x35cull, f2u32(25.0f));
++    ST32(cam_mode + 0x54ull, f2u32(2.0f));
++    ST32(sp_base + 0x48ull, f2u32(-8.0f));
++
++    mouse_camera_push_motion(100.0, -50.0, 2600000ull);
++    cpu.x[8] = vtable;
++    totk_camera_v143_on_mode_pre_calc(&cpu);
++    cpu.v[0] = f2u32(3.0f);
++    totk_camera_v143_on_finder_pitch(&cpu);
++    check_near(u32f(LD32(cam_mode + 0x50ull)), 3.0f - (50.0f * 0.04f * fov_scale), 1e-4f, "finder pitch");
++    check_near(u32f(LD32(cam_mode + 0x54ull)), 0.0f, 1e-6f, "finder pitch vel zero");
++    totk_camera_v143_on_finder_yaw(&cpu);
++    check_near(u32f(LD32(sp_base + 0x48ull)), -8.0f - (100.0f * 0.04f * fov_scale), 1e-4f, "finder yaw");
++
++    /* Fallback spherical solver on Abyss mode (0x8023bd8d8) */
++    ST64(vtable + 0x120ull, TOTK_V143_CALC_ABYSS);
++    ST32(p_ctrl + 0x35cull, f2u32(50.0f));
++    ST32(p_ctrl + 0x338ull, f2u32(0.0f));
++    ST32(p_ctrl + 0x33cull, f2u32(0.0f));
++    ST32(p_ctrl + 0x340ull, f2u32(5.0f));
++    ST32(p_ctrl + 0x344ull, f2u32(0.0f));
++    ST32(p_ctrl + 0x348ull, f2u32(0.0f));
++    ST32(p_ctrl + 0x34cull, f2u32(0.0f));
++    ST32(p_ctrl + 0x410ull, f2u32(0.0f));
++    ST32(p_ctrl + 0x414ull, f2u32(0.0f));
++
++    mouse_camera_push_motion(100.0, 0.0, 3000000ull);
++    cpu.x[8] = vtable;
++    totk_camera_v143_on_mode_pre_calc(&cpu);
++    cpu.x[21] = p_ctrl;
++    totk_camera_v143_on_player_cam_calc(&cpu);
++
++    MouseCameraDiag diag;
++    mouse_camera_get_diag(&diag);
++    assert(diag.applied_count == 4);
++    assert(diag.unapplied_count == 0);
++    check_near(u32f(LD32(p_ctrl + 0x414ull)), -(100.0f * 0.04f), 1e-4f, "abyss fallback yaw");
++}
++
++static void test_special_climb_surf_wake_and_horse_hooks(void) {
++    reset_mouse_cam();
++    Cpu cpu;
++    memset(&cpu, 0, sizeof(cpu));
++    uint8_t p_ctrl_buf[0x800];
++    uint8_t mode_buf[0x400];
++    uint8_t vt_buf[0x200];
++    uint8_t stack_buf[0x200];
++    memset(p_ctrl_buf, 0, sizeof(p_ctrl_buf));
++    memset(mode_buf, 0, sizeof(mode_buf));
++    memset(vt_buf, 0, sizeof(vt_buf));
++    memset(stack_buf, 0, sizeof(stack_buf));
++
++    uint64_t p_ctrl = (uint64_t)(uintptr_t)p_ctrl_buf;
++    uint64_t cam_mode = (uint64_t)(uintptr_t)mode_buf;
++    uint64_t vtable = (uint64_t)(uintptr_t)vt_buf;
++    uint64_t sp_base = (uint64_t)(uintptr_t)(stack_buf + 0x100);
++    ST32(p_ctrl + 0x35cull, f2u32(50.0f));
++
++    cpu.x[19] = cam_mode;
++    cpu.x[22] = p_ctrl;
++    cpu.x[29] = sp_base;
++
++    /* 1. SpecialPower (Ultrahand free look 0x8023d2d40) */
++    ST64(vtable + 0x120ull, TOTK_V143_CALC_SPECIAL_POWER);
++    ST32(cam_mode + 0x160ull, f2u32(10.0f));
++    ST32(sp_base - 80ull, f2u32(20.0f));
++    mouse_camera_push_motion(50.0, -25.0, 4000000ull);
++    cpu.x[8] = vtable;
++    totk_camera_v143_on_mode_pre_calc(&cpu);
++    totk_camera_v143_on_special_pitch_load(&cpu);
++    check_near(u32f(LD32(cam_mode + 0x160ull)), 10.0f - (25.0f * 0.04f), 1e-4f, "special pitch load");
++    totk_camera_v143_on_special_pitch_commit(&cpu);
++    check_near(u32f(LD32(cam_mode + 0x50ull)), 10.0f - (25.0f * 0.04f), 1e-4f, "special pitch commit");
++    totk_camera_v143_on_special_yaw(&cpu);
++    check_near(u32f(LD32(sp_base - 80ull)), 20.0f - (50.0f * 0.04f), 1e-4f, "special yaw");
++
++    /* 2. ClimbObj (0x8023c3a98) */
++    ST64(vtable + 0x120ull, TOTK_V143_CALC_CLIMB_OBJ);
++    ST32(cam_mode + 0x90ull, f2u32(30.0f));
++    mouse_camera_push_motion(50.0, -25.0, 5000000ull);
++    cpu.x[8] = vtable;
++    totk_camera_v143_on_mode_pre_calc(&cpu);
++    totk_camera_v143_on_climb_yaw(&cpu);
++    check_near(u32f(LD32(cam_mode + 0x90ull)), 30.0f - (50.0f * 0.04f), 1e-4f, "climb yaw");
++    cpu.v[0] = f2u32(5.0f);
++    totk_camera_v143_on_climb_pitch(&cpu);
++    check_near(u32f(LD32(cam_mode + 0x98ull)), 5.0f - (25.0f * 0.04f), 1e-4f, "climb pitch");
++
++    /* 3. ShieldSurfing (0x8023d0088) */
++    ST64(vtable + 0x120ull, TOTK_V143_CALC_SHIELD_SURFING);
++    ST32(cam_mode + 0xf4ull, f2u32(-10.0f));
++    ST32(cam_mode + 0x100ull, f2u32(8.0f));
++    mouse_camera_push_motion(50.0, -25.0, 6000000ull);
++    cpu.x[8] = vtable;
++    totk_camera_v143_on_mode_pre_calc(&cpu);
++    totk_camera_v143_on_surf_yaw(&cpu);
++    check_near(u32f(LD32(cam_mode + 0xf4ull)), -10.0f - (50.0f * 0.04f), 1e-4f, "surf yaw");
++    totk_camera_v143_on_surf_pitch(&cpu);
++    check_near(u32f(LD32(cam_mode + 0x100ull)), 8.0f - (25.0f * 0.04f), 1e-4f, "surf pitch");
++
++    /* 4. Wakeboard (0x8023da61c) */
++    ST64(vtable + 0x120ull, TOTK_V143_CALC_WAKEBOARD);
++    ST32(cam_mode + 0xf0ull, f2u32(15.0f));
++    ST32(cam_mode + 0xfcull, f2u32(-4.0f));
++    mouse_camera_push_motion(50.0, -25.0, 7000000ull);
++    cpu.x[8] = vtable;
++    totk_camera_v143_on_mode_pre_calc(&cpu);
++    totk_camera_v143_on_wake_yaw(&cpu);
++    check_near(u32f(LD32(cam_mode + 0xf0ull)), 15.0f - (50.0f * 0.04f), 1e-4f, "wake yaw");
++    totk_camera_v143_on_wake_pitch(&cpu);
++    check_near(u32f(LD32(cam_mode + 0xfcull)), -4.0f - (25.0f * 0.04f), 1e-4f, "wake pitch");
++
++    /* 5. Horse (0x8023ca518) */
++    ST64(vtable + 0x120ull, TOTK_V143_CALC_HORSE);
++    ST32(cam_mode + 0xb4ull, f2u32(45.0f));
++    ST32(cam_mode + 0xacull, f2u32(-12.0f));
++    mouse_camera_push_motion(50.0, -25.0, 8000000ull);
++    cpu.x[8] = vtable;
++    totk_camera_v143_on_mode_pre_calc(&cpu);
++    totk_camera_v143_on_horse_yaw(&cpu);
++    check_near(u32f(LD32(cam_mode + 0xb4ull)), 45.0f - (50.0f * 0.04f), 1e-4f, "horse yaw");
++    totk_camera_v143_on_horse_pitch(&cpu);
++    check_near(u32f(LD32(cam_mode + 0xacull)), -12.0f - (25.0f * 0.04f), 1e-4f, "horse pitch");
++
++    MouseCameraDiag diag;
++    mouse_camera_get_diag(&diag);
++    assert(diag.applied_count == 5);
++    assert(diag.unapplied_count == 0);
++}
++
++static void test_adapter_real_dt_smoothing_and_compat_stick_across_fps(void) {
++    const int fps_list[4] = {30, 60, 90, 120};
++    Cpu cpu;
++    uint8_t p_ctrl_buf[0x800];
++    uint8_t mode_buf[0x400];
++    uint8_t vt_buf[0x200];
++
++    /* Part A: Exponential smoothing (smooth_ms = 5) through totk_camera_v143_on_mode_pre_calc uses real dt_sec */
++    for (int i = 0; i < 4; i++) {
++        int fps = fps_list[i];
++        double dt_sec = 1.0 / (double)fps;
++        uint64_t dt_ns = (uint64_t)llround(dt_sec * 1e9);
++
++        MouseCameraConfig cfg = {
++            .version = 2,
++            .mouse_mode = 1,
++            .backend = MOUSE_BACKEND_NATIVE,
++            .look_deg_per_count = 0.04,
++            .aim_multiplier = 1.0,
++            .scope_multiplier = 1.0,
++            .smooth_ms = 5,
++            .invert_y = 0,
++            .legacy_sensitivity = 1.0f,
++            .trace_enabled = 0,
++        };
++        mouse_camera_configure(&cfg);
++        mouse_camera_set_capture(true);
++        totk_camera_v143_reset_state();
++
++        memset(&cpu, 0, sizeof(cpu));
++        memset(p_ctrl_buf, 0, sizeof(p_ctrl_buf));
++        memset(mode_buf, 0, sizeof(mode_buf));
++        memset(vt_buf, 0, sizeof(vt_buf));
++        uint64_t p_ctrl = (uint64_t)(uintptr_t)p_ctrl_buf;
++        uint64_t cam_mode = (uint64_t)(uintptr_t)mode_buf;
++        uint64_t vtable = (uint64_t)(uintptr_t)vt_buf;
++        ST64(vtable + 0x120ull, TOTK_V143_CALC_TAIL);
++        ST32(p_ctrl + 0x35cull, f2u32(50.0f));
++        ST32(cam_mode + 0xc0ull, f2u32(0.0f));
++        ST32(cam_mode + 0xb4ull, f2u32(0.0f));
++
++        uint64_t t0 = 1000000000ull;
++        totk_camera_v143_set_test_time_ns(t0);
++        totk_camera_v143_set_test_time_ns(t0 + dt_ns);
++        mouse_camera_push_motion(100.0, 0.0, t0 + dt_ns);
++
++        cpu.x[19] = cam_mode;
++        cpu.x[22] = p_ctrl;
++        cpu.x[8] = vtable;
++        totk_camera_v143_on_mode_pre_calc(&cpu);
++        totk_camera_v143_on_tail_yaw(&cpu);
++        totk_camera_v143_on_tail_pitch(&cpu);
++
++        double actual_dt = (double)dt_ns * 1e-9;
++        double expected_alpha = 1.0 - exp(-actual_dt / 0.005);
++        float expected_first_yaw = -(float)(100.0 * 0.04 * expected_alpha);
++        check_near(u32f(LD32(cam_mode + 0xc0ull)), expected_first_yaw, 1e-4f, "smooth first step scales with real dt");
++
++        /* Run remaining ticks for 200ms wall-clock and verify full convergence to -4.0 deg */
++        int steps = fps / 5;
++        for (int s = 2; s <= steps + 10; s++) {
++            totk_camera_v143_set_test_time_ns(t0 + (uint64_t)s * dt_ns);
++            cpu.x[8] = vtable;
++            totk_camera_v143_on_mode_pre_calc(&cpu);
++            totk_camera_v143_on_tail_yaw(&cpu);
++            totk_camera_v143_on_tail_pitch(&cpu);
++        }
++        check_near(u32f(LD32(cam_mode + 0xc0ull)), -4.0f, 1e-3f, "smooth converged total angle");
++    }
++
++    /* Part B: Compat stick route in Menu Wheel through totk_camera_v143_on_mode_pre_calc is FPS-invariant */
++    int32_t ref_rx = 0;
++    for (int i = 0; i < 4; i++) {
++        int fps = fps_list[i];
++        double dt_sec = 1.0 / (double)fps;
++        uint64_t dt_ns = (uint64_t)llround(dt_sec * 1e9);
++
++        reset_mouse_cam();
++        memset(&cpu, 0, sizeof(cpu));
++        memset(p_ctrl_buf, 0, sizeof(p_ctrl_buf));
++        memset(mode_buf, 0, sizeof(mode_buf));
++        memset(vt_buf, 0, sizeof(vt_buf));
++        uint64_t p_ctrl = (uint64_t)(uintptr_t)p_ctrl_buf;
++        uint64_t cam_mode = (uint64_t)(uintptr_t)mode_buf;
++        uint64_t vtable = (uint64_t)(uintptr_t)vt_buf;
++        ST64(vtable + 0x120ull, TOTK_V143_CALC_TAIL);
++        ST32(p_ctrl + 0x35cull, f2u32(50.0f));
++
++        /* Block stick camera look (menu wheel active: cam_input_flags bit 0 = 1) */
++        uint64_t t0 = 2000000000ull;
++        totk_camera_v143_set_test_time_ns(t0);
++        totk_camera_v143_set_test_time_ns(t0 + dt_ns);
++
++        cpu.x[20] = p_ctrl;
++        cpu.x[21] = 1;
++        cpu.x[8] = 0;
++        totk_camera_v143_on_read_stick(&cpu);
++
++        /* Constant 300 counts/sec mouse velocity */
++        mouse_camera_push_motion(300.0 * dt_sec, 0.0, t0 + dt_ns);
++        cpu.x[19] = cam_mode;
++        cpu.x[22] = p_ctrl;
++        cpu.x[8] = vtable;
++        totk_camera_v143_on_mode_pre_calc(&cpu);
++
++        MouseCameraDiag diag;
++        mouse_camera_get_diag(&diag);
++        assert(diag.last_cmd.route == LOOK_ROUTE_COMPAT_STICK);
++        if (i == 0) {
++            ref_rx = diag.last_cmd.compat_rx;
++            assert(ref_rx > 9000 && ref_rx < 10500);
++        } else {
++            assert(abs(diag.last_cmd.compat_rx - ref_rx) <= 2);
++        }
++    }
++}
++
++static void test_execute_player_camera_base_both_branches(void) {
++    /* Verify both normal (0x8002e2340) and alternate 0x5c1 (0x8002e2430) branches
++     * of ExecutePlayerCameraBase::execute consume mouse motion once and rotate Tail camera. */
++    for (int alt = 0; alt < 2; alt++) {
++        reset_mouse_cam();
++        totk_camera_v143_set_test_time_ns(5000000000ull);
++
++        Cpu cpu;
++        memset(&cpu, 0, sizeof(cpu));
++        uint8_t p_ctrl_buf[0x800];
++        uint8_t mode_buf[0x400];
++        uint8_t vt_buf[0x200];
++        memset(p_ctrl_buf, 0, sizeof(p_ctrl_buf));
++        memset(mode_buf, 0, sizeof(mode_buf));
++        memset(vt_buf, 0, sizeof(vt_buf));
++
++        uint64_t p_ctrl = (uint64_t)(uintptr_t)p_ctrl_buf;
++        uint64_t cam_mode = (uint64_t)(uintptr_t)mode_buf;
++        uint64_t vtable = (uint64_t)(uintptr_t)vt_buf;
++
++        ST64(cam_mode + 0x0ull, vtable);
++        ST64(cam_mode + 0x20ull, p_ctrl);
++        ST64(vtable + 0x120ull, TOTK_V143_CALC_TAIL);
++        ST32(p_ctrl + 0x35cull, f2u32(50.0f));
++        ST32(cam_mode + 0xc0ull, f2u32(0.0f));
++        ST32(cam_mode + 0xb4ull, f2u32(0.0f));
++        ST8(p_ctrl + 0x5c1ull, alt ? 0x04u : 0x00u);
++
++        mouse_camera_push_motion(100.0, -50.0, 5000000000ull);
++
++        cpu.x[19] = cam_mode;
++        cpu.x[22] = p_ctrl;
++        {
++            uint64_t ea = cpu.x[19] + 0x20ull;
++            uint64_t v = LD64(ea);
++            cpu.x[8] = v;
++        }
++        {
++            uint64_t ea = cpu.x[8] + 0x5c1ull;
++            uint64_t v = LD8(ea);
++            cpu.x[8] = v;
++        }
++        if (((cpu.x[8] >> 2) & 1) != 0) {
++            /* Alternate L_8002e23f0 branch at 0x8002e2430 */
++            cpu.x[8] = LD64(cpu.x[19] + 0x0ull);
++            cpu.x[0] = cpu.x[19];
++            totk_camera_v143_on_mode_pre_calc(&cpu);
++        } else {
++            /* Normal branch at 0x8002e2340 */
++            cpu.x[8] = LD64(cpu.x[19] + 0x0ull);
++            cpu.x[0] = cpu.x[19];
++            totk_camera_v143_on_mode_pre_calc(&cpu);
++        }
++
++        assert(cpu.x[8] == TOTK_V143_CALC_TAIL);
++        totk_camera_v143_on_tail_yaw(&cpu);
++        totk_camera_v143_on_tail_pitch(&cpu);
++
++        check_near(u32f(LD32(cam_mode + 0xc0ull)), -4.0f, 1e-4f, "branch tail yaw");
++        check_near(u32f(LD32(cam_mode + 0xb4ull)), -2.0f, 1e-4f, "branch tail pitch");
++
++        MouseCameraDiag diag;
++        mouse_camera_get_diag(&diag);
++        assert(diag.applied_count == 1);
++        assert(diag.unapplied_count == 0);
++        check_near((float)diag.last_cmd.consumed_dx, 100.0f, 1e-4f, "branch consumed_dx");
++        check_near((float)diag.last_cmd.consumed_dy, -50.0f, 1e-4f, "branch consumed_dy");
++
++        uint64_t normal_ticks = 0, alt_ticks = 0;
++        totk_camera_v143_get_branch_counts(&normal_ticks, &alt_ticks);
++        if (alt == 0) {
++            assert(normal_ticks == 1 && alt_ticks == 0);
++        } else {
++            assert(normal_ticks == 0 && alt_ticks == 1);
++        }
++    }
++}
++
++int main(void) {
++    test_context_classification();
++    test_chase_camera_direct_rotation();
++    test_tail_camera_direct_rotation();
++    test_aim_scope_and_fallback_spherical();
++    test_special_climb_surf_wake_and_horse_hooks();
++    test_adapter_real_dt_smoothing_and_compat_stick_across_fps();
++    test_execute_player_camera_base_both_branches();
++    puts("ALL_CAMERA_V143_TESTS_PASSED");
++    return 0;
++}
++'''
++
++
++class TestCameraV143(unittest.TestCase):
++    def test_01_all_lifter_patch_words_match_totk_143_main(self):
++        """Every patch in CAMERA_PATCHES_V143 must match the exact instruction word in data/exefs/main."""
++        from nso import Nso
++
++        class _NsoWordReader:
++            def __init__(self, path, base):
++                self.nso = Nso(path)
++                self.base = base
++
++            def word(self, addr):
++                return self.nso.u32(addr - self.base)
++
++        m = _NsoWordReader(str(ROOT / "data/exefs/main"), 0x800000000)
++        self.assertEqual(len(CAMERA_PATCHES_V143), 33)
++        self.assertIn(0x8002e2340, CAMERA_PATCHES_V143)
++        self.assertIn(0x8002e2430, CAMERA_PATCHES_V143)
++        self.assertIn(0x80018ec94, CAMERA_PATCHES_V143)
++        self.assertIn(0x80018edec, CAMERA_PATCHES_V143)
++        for addr, patch_fn in CAMERA_PATCHES_V143.items():
++            code = patch_fn(m, addr)
++            self.assertTrue(code.startswith("{"))
++            self.assertTrue(code.endswith("}"))
++
++    def test_03_generated_main_164_hooks_both_execute_branches(self):
++        """Both normal (0x8002e2340) and alternate (0x8002e2430) branches in f_8002e228c must call totk_camera_v143_on_mode_pre_calc."""
++        main_164 = (ROOT / "data/generated/main/main_164.c").read_text(encoding="utf-8")
++        fn_start = main_164.index("void f_8002e228c(Cpu *c)")
++        fn_end = main_164.index("void f_8002e2448(Cpu *c)", fn_start)
++        fn_body = main_164[fn_start:fn_end]
++        hook_stmt = "{ extern void totk_camera_v143_on_mode_pre_calc(Cpu *); totk_camera_v143_on_mode_pre_calc(c); }"
++        self.assertEqual(fn_body.count(hook_stmt), 2)
++        self.assertNotIn("c->x[8] + 0x120ull", fn_body)
++
++    def test_04_generated_main_104_hooks_chase_yaw_and_pitch(self):
++        """ExecutePlayerCameraChase::calc (f_80018e414 in main_104.c) must call both chase yaw and pitch hooks."""
++        main_104 = (ROOT / "data/generated/main/main_104.c").read_text(encoding="utf-8")
++        self.assertIn("{ extern void totk_camera_v143_on_chase_yaw(Cpu *); totk_camera_v143_on_chase_yaw(c); }", main_104)
++        self.assertIn("{ extern void totk_camera_v143_on_chase_pitch(Cpu *); totk_camera_v143_on_chase_pitch(c); }", main_104)
++
++    def test_02_c_adapter_hooks_and_classification(self):
++        """Compile and run C test suite for src/host/camera_v143.c with -Wall -Wextra -Werror."""
++        with tempfile.TemporaryDirectory() as tmpdir:
++            tmp = pathlib.Path(tmpdir)
++            harness_c = tmp / "harness.c"
++            harness_exe = tmp / "harness.exe"
++            harness_c.write_text(HARNESS_C, encoding="utf-8")
++
++            clang = COMPILER
++            cmd = [
++                str(clang),
++                "-O2",
++                "-pthread",
++                "-lm",
++                "-Wall",
++                "-Wextra",
++                "-Werror",
++                "-I" + str(ROOT / "src/host"),
++                "-I" + str(ROOT / "src/runtime"),
++                str(ROOT / "src/host/mouse_camera.c"),
++                str(ROOT / "src/host/camera_v143.c"),
++                str(harness_c),
++                "-o",
++                str(harness_exe),
++            ]
++            subprocess.run(cmd, cwd=ROOT, env=tool_env(), check=True)
++            res = subprocess.run([str(harness_exe)], cwd=ROOT, env=tool_env(), capture_output=True, text=True, check=True)
++            self.assertIn("ALL_CAMERA_V143_TESTS_PASSED", res.stdout)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tools/test_mouse_camera.py b/tools/test_mouse_camera.py
+new file mode 100644
+index 0000000..c1d3126
+--- /dev/null
++++ b/tools/test_mouse_camera.py
+@@ -0,0 +1,482 @@
++"""Unit and behavioral tests for Phase 2 (src/host/mouse_camera.c)."""
++import math
++import pathlib
++import subprocess
++import sys
++import unittest
++import uuid
++
++ROOT = pathlib.Path(__file__).resolve().parent.parent
++sys.path.insert(0, str(ROOT / 'tools'))
++from toolchain import CLANG64, LINUX_TOOLS, env  # noqa: E402
++
++COMPILER = LINUX_TOOLS['clang'] if sys.platform == 'linux' else CLANG64 / 'clang.exe'
++
++class MouseCameraLayerTests(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.work = ROOT / 'build' / ('mouse-cam-test-' + uuid.uuid4().hex)
++        cls.work.mkdir(parents=True, exist_ok=True)
++        harness = r'''
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <math.h>
++#include "mouse_camera.h"
++
++int main(void) {
++    char line[512], k[128], v[128], kv[260];
++    mouse_camera_init_from_env();
++    while (fgets(line, sizeof line, stdin)) {
++        if (line[0] == 'e') {
++            if (sscanf(line + 1, "%127s %127s", k, v) == 2) {
++                snprintf(kv, sizeof kv, "%s=%s", k, v);
++                #ifdef _WIN32
++                _putenv(kv);
++                #else
++                setenv(k, v, 1);
++                #endif
++            }
++            puts("ok");
++        } else if (line[0] == 'i') {
++            mouse_camera_init_from_env();
++            puts("ok");
++        } else if (line[0] == 'c') {
++            int cap = 0;
++            sscanf(line + 1, "%d", &cap);
++            mouse_camera_set_capture(cap != 0);
++            puts("ok");
++        } else if (line[0] == 'r') {
++            int reason = 0;
++            sscanf(line + 1, "%d", &reason);
++            mouse_camera_reset((MouseResetReason)reason);
++            puts("ok");
++        } else if (line[0] == 'm') {
++            double dx = 0, dy = 0;
++            unsigned long long ts = 0;
++            sscanf(line + 1, "%lf %lf %llu", &dx, &dy, &ts);
++            mouse_camera_push_motion(dx, dy, ts);
++            puts("ok");
++        } else if (line[0] == 's') {
++            float rx = 0, ry = 0;
++            unsigned long long ts = 0;
++            sscanf(line + 1, "%f %f %llu", &rx, &ry, &ts);
++            mouse_camera_offer_stick(rx, ry, ts);
++            puts("ok");
++        } else if (line[0] == 't') {
++            unsigned long long tick = 0, gen = 1, now_ns = 0;
++            int ctx = 1, allow = 1;
++            double dt = 1.0 / 60.0;
++            float yaw = 0, pitch = 0, pmin = -1.4f, pmax = 1.4f, cfov = 0.8726646f, nfov = 0.8726646f;
++            sscanf(line + 1, "%llu %llu %d %llu %lf %d %f %f %f %f %f %f",
++                   &tick, &gen, &ctx, &now_ns, &dt, &allow, &yaw, &pitch, &pmin, &pmax, &cfov, &nfov);
++            CameraFrame frame = {
++                .tick_id = tick,
++                .camera_generation = gen,
++                .context = (CameraContext)ctx,
++                .now_ns = now_ns,
++                .dt_sec = dt,
++                .allow_manual_look = (allow != 0),
++                .current_yaw_rad = yaw,
++                .current_pitch_rad = pitch,
++                .pitch_min_rad = pmin,
++                .pitch_max_rad = pmax,
++                .current_vfov_rad = cfov,
++                .neutral_vfov_rad = nfov,
++            };
++            LookCommand cmd;
++            mouse_camera_begin_tick(&frame, &cmd);
++            printf("%d %d %llu %.9f %.9f %.9f %.9f %d %d %d %d\n",
++                   (int)cmd.owner, (int)cmd.route, (unsigned long long)cmd.epoch,
++                   cmd.yaw_delta_rad, cmd.pitch_delta_rad,
++                   cmd.target_yaw_rad, cmd.target_pitch_rad,
++                   cmd.compat_rx, cmd.compat_ry,
++                   cmd.suppress_gyro ? 1 : 0, cmd.suppress_gamepad_rstick ? 1 : 0);
++        } else if (line[0] == 'a') {
++            unsigned long long tick = 0, gen = 1;
++            sscanf(line + 1, "%llu %llu", &tick, &gen);
++            mouse_camera_mark_applied(tick, gen);
++            puts("ok");
++        } else if (line[0] == 'd') {
++            MouseCameraDiag diag;
++            mouse_camera_get_diag(&diag);
++            printf("%llu %llu %llu %llu %d %d %d %.6f %.6f\n",
++                   (unsigned long long)diag.epoch,
++                   (unsigned long long)diag.unapplied_count,
++                   (unsigned long long)diag.applied_count,
++                   (unsigned long long)diag.unclassified_count,
++                   (int)diag.owner,
++                   diag.captured ? 1 : 0,
++                   diag.stick_armed ? 1 : 0,
++                   diag.pending_dx, diag.pending_dy);
++        } else if (line[0] == 'n') {
++            int klx, kly, krx, kry, plx, ply, prx, pry;
++            int olx = 0, oly = 0, orx = 0, ory = 0;
++            sscanf(line + 1, "%d %d %d %d %d %d %d %d",
++                   &klx, &kly, &krx, &kry, &plx, &ply, &prx, &pry);
++            mouse_camera_resolve_npad_sticks(klx, kly, krx, kry, plx, ply, prx, pry,
++                                             &olx, &oly, &orx, &ory);
++            printf("%d %d %d %d\n", olx, oly, orx, ory);
++        }
++        fflush(stdout);
++    }
++    return 0;
++}
++'''
++        (cls.work / 'harness.c').write_text(harness, encoding='utf-8')
++        subprocess.run([
++            str(COMPILER), '-O2', '-pthread', '-lm',
++            '-I' + str(ROOT / 'src/host'),
++            str(ROOT / 'src/host/mouse_camera.c'),
++            str(cls.work / 'harness.c'),
++            '-o', str(cls.work / 'harness.exe')
++        ], env=env(), check=True)
++        cls.proc = subprocess.Popen(
++            [str(cls.work / 'harness.exe')],
++            env=env(), text=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE
++        )
++
++    @classmethod
++    def tearDownClass(cls):
++        cls.proc.stdin.close()
++        cls.proc.wait(timeout=5)
++        for f in cls.work.iterdir():
++            f.unlink()
++        cls.work.rmdir()
++
++    def cmd(self, *args):
++        self.proc.stdin.write(' '.join(map(str, args)) + '\n')
++        self.proc.stdin.flush()
++        line = self.proc.stdout.readline()
++        if not line:
++            raise RuntimeError('Mouse camera harness exited unexpectedly')
++        return line.strip().split()
++
++    def setUp(self):
++        defaults = {
++            'TOTK_CAMERA_MODE': 'mouse',
++            'TOTK_MOUSE_CAMERA_VERSION': '2',
++            'TOTK_MOUSE_BACKEND': 'native',
++            'TOTK_MOUSE_LOOK_DEG_PER_COUNT': '0.04',
++            'TOTK_MOUSE_AIM_MULTIPLIER': '1.0',
++            'TOTK_MOUSE_SCOPE_MULTIPLIER': '1.0',
++            'TOTK_MOUSE_SMOOTH_MS': '0',
++            'TOTK_MOUSE_INVERT_Y': '0',
++            'TOTK_MOUSE_SENSITIVITY': '1.0',
++            'TOTK_MOUSE_TRACE': '0',
++        }
++        for k, v in defaults.items():
++            self.cmd('e', k, v)
++        self.cmd('i')
++        self.cmd('c', 1)
++
++    def tick(self, tick_id, ctx=1, now_ns=1_000_000_000, dt=1.0/60.0, allow=1,
++             yaw=0.0, pitch=0.0, pmin=-1.4, pmax=1.4, cfov=0.8726646, nfov=0.8726646, gen=1):
++        parts = self.cmd('t', tick_id, gen, ctx, now_ns, f'{dt:.8f}', allow,
++                         f'{yaw:.6f}', f'{pitch:.6f}', f'{pmin:.6f}', f'{pmax:.6f}',
++                         f'{cfov:.6f}', f'{nfov:.6f}')
++        return {
++            'owner': int(parts[0]),
++            'route': int(parts[1]),
++            'epoch': int(parts[2]),
++            'dyaw': float(parts[3]),
++            'dpitch': float(parts[4]),
++            'tyaw': float(parts[5]),
++            'tpitch': float(parts[6]),
++            'rx': int(parts[7]),
++            'ry': int(parts[8]),
++            'suppress_gyro': int(parts[9]) == 1,
++            'suppress_rstick': int(parts[10]) == 1,
++        }
++
++    def diag(self):
++        parts = self.cmd('d')
++        return {
++            'epoch': int(parts[0]),
++            'unapplied': int(parts[1]),
++            'applied': int(parts[2]),
++            'unclassified': int(parts[3]),
++            'owner': int(parts[4]),
++            'captured': int(parts[5]) == 1,
++            'stick_armed': int(parts[6]) == 1,
++            'pending_dx': float(parts[7]),
++            'pending_dy': float(parts[8]),
++        }
++
++    def test_same_total_delta_across_different_event_splits_produces_identical_rotation(self):
++        splits = [
++            [(100.0, -50.0)],
++            [(10.0, -5.0)] * 10,
++            [(2.5, -1.25)] * 40,
++            [(0.5, -0.25)] * 200,
++        ]
++        results = []
++        for idx, events in enumerate(splits, start=1):
++            self.cmd('r', 0)
++            self.cmd('c', 1)
++            for i, (dx, dy) in enumerate(events):
++                self.cmd('m', dx, dy, 1_000_000 + i * 1000)
++            res = self.tick(idx)
++            self.cmd('a', idx, 1)
++            results.append((res['dyaw'], res['dpitch']))
++        expected_yaw = math.radians(100.0 * 0.04)
++        expected_pitch = math.radians(50.0 * 0.04)
++        for dyaw, dpitch in results:
++            self.assertAlmostEqual(dyaw, expected_yaw, places=6)
++            self.assertAlmostEqual(dpitch, expected_pitch, places=6)
++
++    def test_fps_independence_30_60_90_120_and_no_acceleration(self):
++        angles = []
++        for tick_id, fps in enumerate((30, 60, 90, 120), start=1):
++            self.cmd('r', 0)
++            self.cmd('c', 1)
++            self.cmd('m', 75.0, -30.0, 10_000_000)
++            res = self.tick(tick_id, dt=1.0 / fps)
++            self.cmd('a', tick_id, 1)
++            angles.append((res['dyaw'], res['dpitch']))
++        base_yaw, base_pitch = angles[0]
++        for dyaw, dpitch in angles[1:]:
++            self.assertAlmostEqual(dyaw, base_yaw, places=7)
++            self.assertAlmostEqual(dpitch, base_pitch, places=7)
++
++    def test_single_unit_and_fractional_deltas_and_invert_y(self):
++        self.cmd('m', 1.0, 1.0, 1000)
++        res = self.tick(1)
++        self.cmd('a', 1, 1)
++        self.assertGreater(res['dyaw'], 0.0)
++        self.assertLess(res['dpitch'], 0.0)  # +dy (down) -> negative pitch when invert_y=0
++
++        # Fractional delta while mouse owns look
++        self.cmd('m', 0.25, -0.5, 2000)
++        res2 = self.tick(2)
++        self.cmd('a', 2, 1)
++        self.assertAlmostEqual(res2['dyaw'], math.radians(0.25 * 0.04), places=7)
++        self.assertAlmostEqual(res2['dpitch'], math.radians(0.5 * 0.04), places=7)
++
++        # Invert Y flips only vertical sign
++        self.cmd('e', 'TOTK_MOUSE_INVERT_Y', '1')
++        self.cmd('i')
++        self.cmd('c', 1)
++        self.cmd('m', 10.0, 10.0, 3000)
++        res3 = self.tick(3)
++        self.cmd('a', 3, 1)
++        self.assertAlmostEqual(res3['dyaw'], math.radians(10.0 * 0.04), places=6)
++        self.assertAlmostEqual(res3['dpitch'], math.radians(10.0 * 0.04), places=6)
++
++    def test_diagonal_sweep_preserves_ratio_in_direct_and_compat_stick_modes(self):
++        # Direct mode large diagonal sweep
++        self.cmd('m', 600.0, -300.0, 1000)
++        res = self.tick(1)
++        self.cmd('a', 1, 1)
++        self.assertAlmostEqual(res['dyaw'] / res['dpitch'], 2.0, places=5)
++
++        # Menu wheel / compat stick mode large diagonal sweep: radial clamp preserves 2:1 ratio
++        self.cmd('m', 2000.0, -1000.0, 2000)
++        res_wheel = self.tick(2, ctx=5, dt=1.0 / 60.0)  # CAMERA_CTX_MENU_WHEEL = 5
++        self.assertEqual(res_wheel['route'], 2)  # LOOK_ROUTE_COMPAT_STICK
++        mag = math.hypot(res_wheel['rx'], res_wheel['ry'])
++        self.assertAlmostEqual(mag, 32767.0, delta=2.0)
++        self.assertAlmostEqual(res_wheel['rx'] / res_wheel['ry'], 2.0, delta=0.01)
++
++    def test_single_consumption_and_unapplied_motion_detection(self):
++        self.cmd('m', 50.0, -25.0, 1000)
++        first = self.tick(10)
++        self.assertEqual(first['route'], 1)
++        self.assertGreater(abs(first['dyaw']), 0.0)
++        # Mark applied on tick 10
++        self.cmd('a', 10, 1)
++        # Second query on same tick 10 returns route=NONE and 0 delta
++        dup = self.tick(10)
++        self.assertEqual(dup['route'], 0)
++        self.assertEqual(dup['dyaw'], 0.0)
++        self.assertEqual(dup['dpitch'], 0.0)
++        self.assertEqual(self.diag()['unapplied'], 0)
++        self.assertEqual(self.diag()['applied'], 1)
++
++        # Now test unapplied motion: tick 11 consumes motion, never calls mark_applied, then tick 12 runs
++        self.cmd('m', 40.0, -20.0, 2000)
++        t11 = self.tick(11)
++        self.assertGreater(abs(t11['dyaw']), 0.0)
++        # Advance to tick 12 without marking tick 11 applied:
++        t12 = self.tick(12)
++        self.assertEqual(t12['dyaw'], 0.0)  # Never replays stale motion
++        self.assertEqual(self.diag()['unapplied'], 1)
++
++    def test_long_frame_preserves_motion_without_replay(self):
++        self.cmd('m', 120.0, -60.0, 1000)
++        res = self.tick(1, dt=0.200)  # 200ms long frame
++        self.cmd('a', 1, 1)
++        self.assertAlmostEqual(res['dyaw'], math.radians(120.0 * 0.04), places=6)
++        res_next = self.tick(2, dt=0.016)
++        self.assertEqual(res_next['dyaw'], 0.0)
++
++    def test_stop_has_zero_tail_when_smooth_zero_and_exponential_smoothing_conserves_angle(self):
++        self.cmd('m', 100.0, -50.0, 1000)
++        r1 = self.tick(1)
++        self.cmd('a', 1, 1)
++        self.assertGreater(abs(r1['dyaw']), 0.0)
++        r2 = self.tick(2)
++        self.assertEqual(r2['dyaw'], 0.0)
++        self.assertEqual(r2['dpitch'], 0.0)
++
++        # Enable 10ms smoothing and verify total integrated angle equals unsmoothed target
++        self.cmd('e', 'TOTK_MOUSE_SMOOTH_MS', '10')
++        self.cmd('i')
++        self.cmd('c', 1)
++        self.cmd('m', 100.0, -50.0, 2000)
++        total_yaw = 0.0
++        total_pitch = 0.0
++        for t in range(1, 40):
++            rt = self.tick(t, dt=1.0 / 60.0)
++            if rt['route'] == 1 and (abs(rt['dyaw']) > 0 or abs(rt['dpitch']) > 0):
++                self.cmd('a', t, 1)
++            total_yaw += rt['dyaw']
++            total_pitch += rt['dpitch']
++        self.assertAlmostEqual(total_yaw, math.radians(100.0 * 0.04), places=5)
++        self.assertAlmostEqual(total_pitch, math.radians(50.0 * 0.04), places=5)
++
++        # Verify context switch kills remaining smoothing tail immediately
++        self.cmd('m', 100.0, -50.0, 3000)
++        first_step = self.tick(50, ctx=1, dt=0.005)
++        self.cmd('a', 50, 1)
++        self.assertLess(first_step['dyaw'], math.radians(100.0 * 0.04))
++        # Switch context to AIM (ctx=2) with no new mouse input: tail from FREE_ROAM must not bleed
++        switched = self.tick(51, ctx=2, dt=0.005)
++        self.assertEqual(switched['dyaw'], 0.0)
++        self.assertEqual(switched['dpitch'], 0.0)
++
++    def test_focus_loss_f8_and_loading_clear_pending_motion(self):
++        self.cmd('m', 80.0, -40.0, 1000)
++        self.cmd('c', 0)  # F8 release or focus lost
++        self.cmd('c', 1)
++        res = self.tick(1)
++        self.assertEqual(res['dyaw'], 0.0)
++
++        # Loading / cutscene (ctx=9 CAMERA_CTX_DISABLED) drops pending motion
++        self.cmd('m', 80.0, -40.0, 2000)
++        disabled = self.tick(2, ctx=9, allow=0)
++        self.assertEqual(disabled['route'], 0)
++        self.assertEqual(disabled['dyaw'], 0.0)
++        resumed = self.tick(3, ctx=1, allow=1)
++        self.assertEqual(resumed['dyaw'], 0.0)
++
++    def test_stick_and_mouse_ownership_handoff_rules(self):
++        # 1. Start in mouse ownership; stick drift (<25%) does not steal ownership
++        self.cmd('s', 0.18, 0.10, 10_000_000)
++        self.cmd('s', 0.18, 0.10, 100_000_000)
++        self.assertEqual(self.diag()['owner'], 0)  # LOOK_OWNER_MOUSE
++
++        # 2. Stick > 25% for < 50ms (e.g. 30ms) does not steal ownership
++        self.cmd('s', 0.50, 0.0, 200_000_000)
++        self.cmd('s', 0.50, 0.0, 230_000_000)
++        self.assertEqual(self.diag()['owner'], 0)
++
++        # 3. Stick > 25% for >= 50ms steals ownership to GAMEPAD
++        self.cmd('s', 0.50, 0.0, 255_000_000)
++        self.assertEqual(self.diag()['owner'], 1)  # LOOK_OWNER_GAMEPAD
++        r_pad = self.tick(1)
++        self.assertEqual(r_pad['owner'], 1)
++        self.assertFalse(r_pad['suppress_gyro'])
++
++        # 4. Fractional mouse motion (< 1.0 count) does not reclaim yet, but accumulates
++        self.cmd('m', 0.4, 0.3, 260_000_000)  # hypot = 0.5 < 1.0
++        self.assertEqual(self.diag()['owner'], 1)
++        # Next motion brings accumulated hypot to >= 1.0: reclaims MOUSE and keeps full accumulated delta!
++        self.cmd('m', 0.4, 0.3, 265_000_000)  # total dx=0.8, dy=0.6 -> hypot = 1.0
++        self.assertEqual(self.diag()['owner'], 0)
++        r_mouse = self.tick(2)
++        self.cmd('a', 2, 1)
++        self.assertEqual(r_mouse['owner'], 0)
++        self.assertTrue(r_mouse['suppress_gyro'])
++        self.assertAlmostEqual(r_mouse['dyaw'], math.radians(0.8 * 0.04), places=6)
++        self.assertAlmostEqual(r_mouse['dpitch'], math.radians(-0.6 * 0.04), places=6)
++
++        # 5. Stick is STILL tilted (0.50): must NOT reclaim ownership until it returns to <15% for 100ms
++        self.cmd('s', 0.60, 0.0, 300_000_000)
++        self.cmd('s', 0.60, 0.0, 400_000_000)
++        self.assertEqual(self.diag()['owner'], 0)  # Still MOUSE!
++
++        # 6. Stick enters <15% for 60ms (not yet 100ms), then pushes >25%: still disarmed!
++        self.cmd('s', 0.05, 0.0, 500_000_000)
++        self.cmd('s', 0.05, 0.0, 560_000_000)
++        self.cmd('s', 0.60, 0.0, 570_000_000)
++        self.cmd('s', 0.60, 0.0, 650_000_000)
++        self.assertEqual(self.diag()['owner'], 0)
++
++        # 7. Stick stays <15% for >= 100ms to re-arm, then >25% for >= 50ms to reclaim GAMEPAD
++        self.cmd('s', 0.02, 0.0, 700_000_000)
++        self.cmd('s', 0.02, 0.0, 805_000_000)  # 105ms in neutral -> armed!
++        self.assertTrue(self.diag()['stick_armed'])
++        self.cmd('s', 0.40, 0.0, 810_000_000)
++        self.cmd('s', 0.40, 0.0, 865_000_000)  # 55ms > 25% -> GAMEPAD!
++        self.assertEqual(self.diag()['owner'], 1)
++
++    def test_steady_stick_takeover_and_rearm_advance_on_camera_ticks_without_extra_events(self):
++        # Single stick deflection event at t=100ms, held completely steady (no further SDL axis events)
++        self.cmd('s', 0.60, 0.0, 100_000_000)
++        self.assertEqual(self.diag()['owner'], 0)
++
++        # At t=130ms (30ms elapsed), camera tick runs -> still MOUSE
++        t1 = self.tick(1, now_ns=130_000_000)
++        self.assertEqual(t1['owner'], 0)
++
++        # At t=150ms (50ms elapsed), camera tick runs -> transitions to GAMEPAD without needing another stick event!
++        t2 = self.tick(2, now_ns=150_000_000)
++        self.assertEqual(t2['owner'], 1)
++        self.assertEqual(self.diag()['owner'], 1)
++
++        # Mouse reclaims ownership at t=160ms, disarming the stick
++        self.cmd('m', 2.0, 0.0, 160_000_000)
++        self.assertEqual(self.diag()['owner'], 0)
++        self.assertFalse(self.diag()['stick_armed'])
++
++        # Single stick release to neutral at t=200ms, then untouched (no further SDL axis events)
++        self.cmd('s', 0.0, 0.0, 200_000_000)
++        self.assertFalse(self.diag()['stick_armed'])
++
++        # At t=260ms (60ms in neutral), camera tick runs -> still disarmed
++        self.tick(3, now_ns=260_000_000)
++        self.assertFalse(self.diag()['stick_armed'])
++
++        # At t=300ms (100ms in neutral), camera tick runs -> re-armed without needing another stick event!
++        self.tick(4, now_ns=300_000_000)
++        self.assertTrue(self.diag()['stick_armed'])
++
++    def test_no_axis_mixing_between_devices(self):
++        # Left stick: keyboard has (32767, 0), pad has (0, 20000). Stronger vector wins as a whole!
++        parts = list(map(int, self.cmd('n', 32767, 0, 0, 0, 0, 20000, 15000, -15000)))
++        # Mouse owns look -> right stick is (0, 0), left stick is keyboard's (32767, 0) without mixing pad's Y=20000!
++        self.assertEqual(parts, [32767, 0, 0, 0])
++
++    def test_fov_scaling_in_aim_and_scope_and_lock_on_preservation(self):
++        self.cmd('e', 'TOTK_MOUSE_AIM_MULTIPLIER', '0.8')
++        self.cmd('e', 'TOTK_MOUSE_SCOPE_MULTIPLIER', '0.5')
++        self.cmd('i')
++        self.cmd('c', 1)
++
++        nfov = math.radians(50.0)
++        cfov = math.radians(25.0)
++        fov_scale = math.tan(cfov / 2.0) / math.tan(nfov / 2.0)
++
++        self.cmd('m', 100.0, 0.0, 1000)
++        aim_res = self.tick(1, ctx=2, cfov=cfov, nfov=nfov)  # CAMERA_CTX_AIM = 2
++        self.cmd('a', 1, 1)
++        expected_aim = math.radians(100.0 * 0.04 * fov_scale * 0.8)
++        self.assertAlmostEqual(aim_res['dyaw'], expected_aim, places=6)
++
++        self.cmd('m', 100.0, 0.0, 2000)
++        scope_res = self.tick(2, ctx=3, cfov=cfov, nfov=nfov)  # CAMERA_CTX_SCOPE = 3
++        self.cmd('a', 2, 1)
++        expected_scope = math.radians(100.0 * 0.04 * fov_scale * 0.5)
++        self.assertAlmostEqual(scope_res['dyaw'], expected_scope, places=6)
++
++        # Lock-on (ctx=4): mouse motion does not break lock-on or emit Npad stick
++        self.cmd('m', 100.0, -50.0, 3000)
++        lock_res = self.tick(3, ctx=4)
++        self.assertEqual(lock_res['route'], 0)
++        self.assertEqual(lock_res['rx'], 0)
++        self.assertEqual(lock_res['ry'], 0)
++
++
++if __name__ == '__main__':
++    unittest.main(verbosity=2)

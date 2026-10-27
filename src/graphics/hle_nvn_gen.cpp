@@ -2,12 +2,16 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
+#include <atomic>
+#include <chrono>
 #include <unordered_map>
 #include <string>
 #include "graphics/nvn_buffer_cache.h"
 #include "graphics/nvn_conditional_draw.h"
 #include "graphics/nvn_texture_cache.h"
 #include "graphics/nvn_uniform_snapshot.h"
+#include "graphics/nvn_bindless.h"
+#include "graphics/nvn_render_states.h"
 #include "graphics/nvn_vk.h"
 
 namespace totk::graphics {
@@ -309,21 +313,24 @@ static uint64_t hle_nvnCommandBufferBeginTransformFeedback(uint64_t x0 = 0, uint
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferBindBlendState(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferBindBlendState(uint64_t cb = 0, uint64_t state = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnRenderStateManager::instance().bind_blend_state(reinterpret_cast<const void *>(state));
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferBindChannelMaskState(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferBindChannelMaskState(uint64_t cb = 0, uint64_t state = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnRenderStateManager::instance().bind_channel_mask_state(reinterpret_cast<const void *>(state));
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferBindColorState(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferBindColorState(uint64_t cb = 0, uint64_t state = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnRenderStateManager::instance().bind_color_state(reinterpret_cast<const void *>(state));
     return 0;
 }
 
@@ -333,9 +340,10 @@ static uint64_t hle_nvnCommandBufferBindCoverageModulationTable(uint64_t x0 = 0,
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferBindDepthStencilState(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferBindDepthStencilState(uint64_t cb = 0, uint64_t state = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnRenderStateManager::instance().bind_depth_stencil_state(reinterpret_cast<const void *>(state));
     return 0;
 }
 
@@ -351,15 +359,17 @@ static uint64_t hle_nvnCommandBufferBindImages(uint64_t x0 = 0, uint64_t x1 = 0,
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferBindMultisampleState(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferBindMultisampleState(uint64_t cb = 0, uint64_t state = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnRenderStateManager::instance().bind_multisample_state(reinterpret_cast<const void *>(state));
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferBindPolygonState(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferBindPolygonState(uint64_t cb = 0, uint64_t state = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnRenderStateManager::instance().bind_polygon_state(reinterpret_cast<const void *>(state));
     return 0;
 }
 
@@ -580,9 +590,12 @@ static uint64_t hle_nvnCommandBufferDiscardDepthStencil(uint64_t x0 = 0, uint64_
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferDispatchCompute(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferDispatchCompute(uint64_t cb = 0, uint64_t x = 0, uint64_t y = 0, uint64_t z = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->cmd_dispatch_compute(static_cast<uint32_t>(x), static_cast<uint32_t>(y), static_cast<uint32_t>(z));
+    }
     return 0;
 }
 
@@ -822,21 +835,30 @@ static uint64_t hle_nvnCommandBufferPushDebugGroupStatic(uint64_t x0 = 0, uint64
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferReportCounter(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferReportCounter(uint64_t cb = 0, uint64_t counter_type = 0, uint64_t dest_addr = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)counter_type; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (dest_addr) {
+        auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        uint64_t payload[2] = {1000ULL, static_cast<uint64_t>(now_ns)};
+        std::memcpy(reinterpret_cast<void *>(dest_addr), payload, sizeof(payload));
+    }
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferReportValue(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferReportValue(uint64_t cb = 0, uint64_t dest_addr = 0, uint64_t val = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (dest_addr) {
+        *reinterpret_cast<uint32_t *>(dest_addr) = static_cast<uint32_t>(val);
+    }
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferResetCounter(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferResetCounter(uint64_t cb = 0, uint64_t counter_type = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)counter_type; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
     return 0;
 }
 
@@ -998,19 +1020,40 @@ static uint64_t hle_nvnCommandBufferSetRasterizerDiscard(uint64_t x0 = 0, uint64
 
 static uint64_t hle_nvnCommandBufferSetRenderEnable(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x0; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *backend = VulkanBackend::get_active()) {
+        if (!x1) {
+            backend->get_recording_state_mut().recorded_conditional_renders++;
+            backend->get_conditional_render_mgr().begin_conditional_render(
+                backend->get_current_command_buffer(), 0, ConditionalRenderMode::RenderIfEqual);
+        } else {
+            backend->get_conditional_render_mgr().end_conditional_render(backend->get_current_command_buffer());
+        }
+    }
     return 0;
 }
 
 static uint64_t hle_nvnCommandBufferSetRenderEnableConditional(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x0; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->get_recording_state_mut().recorded_conditional_renders++;
+        backend->get_conditional_render_mgr().begin_conditional_render(
+            backend->get_current_command_buffer(), x2, static_cast<ConditionalRenderMode>(x1));
+    }
     return 0;
 }
 
 static uint64_t hle_nvnCommandBufferSetRenderTargets(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x0; (void)x3; (void)x5; (void)x6; (void)x7;
+    auto *backend = VulkanBackend::get_active();
+    if (backend) {
+        uint32_t num_colors = static_cast<uint32_t>(x1);
+        const uint64_t *color_targets = reinterpret_cast<const uint64_t *>(x2);
+        uint64_t depth_target = x4;
+        backend->cmd_set_render_targets_simple(num_colors, color_targets, depth_target);
+    }
     return 0;
 }
 
@@ -1020,9 +1063,10 @@ static uint64_t hle_nvnCommandBufferSetSampleMask(uint64_t x0 = 0, uint64_t x1 =
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferSetSamplerPool(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferSetSamplerPool(uint64_t cb = 0, uint64_t pool = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().bind_sampler_pool(pool);
     return 0;
 }
 
@@ -1072,9 +1116,10 @@ static uint64_t hle_nvnCommandBufferSetSubpixelPrecisionBias(uint64_t x0 = 0, ui
     return 0;
 }
 
-static uint64_t hle_nvnCommandBufferSetTexturePool(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnCommandBufferSetTexturePool(uint64_t cb = 0, uint64_t pool = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)cb; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().bind_texture_pool(pool);
     return 0;
 }
 
@@ -1297,28 +1342,32 @@ static uint64_t hle_nvnDeviceGetProcAddress(uint64_t x0 = 0, uint64_t x1 = 0, ui
     return reinterpret_cast<uint64_t>(fn);
 }
 
-static uint64_t hle_nvnDeviceGetSeparateSamplerHandle(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnDeviceGetSeparateSamplerHandle(uint64_t dev = 0, uint64_t sampler_id = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    (void)dev; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().increment_handle_query_count();
+    return NvnBindlessManager::pack_sampler_handle(static_cast<uint32_t>(sampler_id));
 }
 
-static uint64_t hle_nvnDeviceGetSeparateTextureHandle(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnDeviceGetSeparateTextureHandle(uint64_t dev = 0, uint64_t texture_id = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    (void)dev; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().increment_handle_query_count();
+    return NvnBindlessManager::pack_texel_fetch_handle(static_cast<uint32_t>(texture_id));
 }
 
-static uint64_t hle_nvnDeviceGetTexelFetchHandle(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnDeviceGetTexelFetchHandle(uint64_t dev = 0, uint64_t texture_id = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    (void)dev; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().increment_handle_query_count();
+    return NvnBindlessManager::pack_texel_fetch_handle(static_cast<uint32_t>(texture_id));
 }
 
-static uint64_t hle_nvnDeviceGetTextureHandle(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnDeviceGetTextureHandle(uint64_t dev = 0, uint64_t texture_id = 0, uint64_t sampler_id = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
-    return 0;
+    (void)dev; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().increment_handle_query_count();
+    return NvnBindlessManager::pack_texture_handle(static_cast<uint32_t>(texture_id), static_cast<uint32_t>(sampler_id));
 }
 
 static uint64_t hle_nvnDeviceGetTimestampInNanoseconds(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
@@ -1823,9 +1872,21 @@ static uint64_t hle_nvnQueueBuilderSetQueueMemory(uint64_t x0 = 0, uint64_t x1 =
     return 0;
 }
 
+struct NvnSyncInternal {
+    uint32_t magic = 0x434E5953; // 'SYNC'
+    uint32_t fenced = 0;
+    uint64_t fence_value = 0;
+};
+static std::atomic<uint64_t> s_fence_counter{1};
+
 static uint64_t hle_nvnQueueFenceSync(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x0; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    auto *s = reinterpret_cast<NvnSyncInternal *>(x1);
+    if (s) {
+        s->fenced = 1;
+        s->fence_value = ++s_fence_counter;
+    }
     return 0;
 }
 
@@ -1838,12 +1899,18 @@ static uint64_t hle_nvnQueueFinalize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t 
 static uint64_t hle_nvnQueueFinish(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
     (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->queue_finish();
+    }
     return 0;
 }
 
 static uint64_t hle_nvnQueueFlush(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
     (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->queue_flush();
+    }
     return 0;
 }
 
@@ -1905,7 +1972,10 @@ static uint64_t hle_nvnQueueSetDebugLabel(uint64_t x0 = 0, uint64_t x1 = 0, uint
 }
 
 static void hle_nvnQueueSubmitCommands(uint64_t q, int num_cmds, const void *handles) {
-    (void)q; (void)num_cmds; (void)handles;
+    (void)q;
+    if (auto *backend = VulkanBackend::get_active()) {
+        backend->queue_submit_commands(num_cmds, handles);
+    }
 }
 
 static uint64_t hle_nvnQueueWaitSync(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
@@ -2004,9 +2074,12 @@ static uint64_t hle_nvnSamplerBuilderSetCompare(uint64_t x0 = 0, uint64_t x1 = 0
     return 0;
 }
 
-static uint64_t hle_nvnSamplerBuilderSetDefaults(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerBuilderSetDefaults(uint64_t b = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (b) {
+        new (reinterpret_cast<void *>(b)) NvnSamplerBuilderInternal();
+    }
     return 0;
 }
 
@@ -2016,15 +2089,30 @@ static uint64_t hle_nvnSamplerBuilderSetDevice(uint64_t x0 = 0, uint64_t x1 = 0,
     return 0;
 }
 
-static uint64_t hle_nvnSamplerBuilderSetLodBias(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerBuilderSetLodBias(uint64_t b = 0, uint64_t bias_bits = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *sb = reinterpret_cast<NvnSamplerBuilderInternal *>(b)) {
+        float f = 0.0f;
+        uint32_t u = static_cast<uint32_t>(bias_bits);
+        std::memcpy(&f, &u, sizeof(f));
+        sb->lod_bias = f;
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerBuilderSetLodClamp(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerBuilderSetLodClamp(uint64_t b = 0, uint64_t min_bits = 0, uint64_t max_bits = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *sb = reinterpret_cast<NvnSamplerBuilderInternal *>(b)) {
+        float fmin = 0.0f, fmax = 1000.0f;
+        uint32_t umin = static_cast<uint32_t>(min_bits);
+        uint32_t umax = static_cast<uint32_t>(max_bits);
+        std::memcpy(&fmin, &umin, sizeof(fmin));
+        std::memcpy(&fmax, &umax, sizeof(fmax));
+        sb->lod_min = fmin;
+        sb->lod_max = fmax;
+    }
     return 0;
 }
 
@@ -2034,27 +2122,45 @@ static uint64_t hle_nvnSamplerBuilderSetLodSnap(uint64_t x0 = 0, uint64_t x1 = 0
     return 0;
 }
 
-static uint64_t hle_nvnSamplerBuilderSetMaxAnisotropy(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerBuilderSetMaxAnisotropy(uint64_t b = 0, uint64_t aniso_bits = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *sb = reinterpret_cast<NvnSamplerBuilderInternal *>(b)) {
+        float f = 1.0f;
+        uint32_t u = static_cast<uint32_t>(aniso_bits);
+        std::memcpy(&f, &u, sizeof(f));
+        sb->max_anisotropy = f;
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerBuilderSetMinMagFilter(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerBuilderSetMinMagFilter(uint64_t b = 0, uint64_t min_f = 0, uint64_t mag_f = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *sb = reinterpret_cast<NvnSamplerBuilderInternal *>(b)) {
+        sb->min_filter = static_cast<uint32_t>(min_f);
+        sb->mag_filter = static_cast<uint32_t>(mag_f);
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerBuilderSetReductionFilter(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerBuilderSetReductionFilter(uint64_t b = 0, uint64_t filter = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *sb = reinterpret_cast<NvnSamplerBuilderInternal *>(b)) {
+        sb->reduction_filter = static_cast<uint32_t>(filter);
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerBuilderSetWrapMode(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerBuilderSetWrapMode(uint64_t b = 0, uint64_t s = 0, uint64_t t = 0, uint64_t r = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *sb = reinterpret_cast<NvnSamplerBuilderInternal *>(b)) {
+        sb->wrap_s = static_cast<uint32_t>(s);
+        sb->wrap_t = static_cast<uint32_t>(t);
+        sb->wrap_r = static_cast<uint32_t>(r);
+    }
     return 0;
 }
 
@@ -2100,45 +2206,82 @@ static uint64_t hle_nvnSamplerGetDebugID(uint64_t x0 = 0, uint64_t x1 = 0, uint6
     return 0;
 }
 
-static uint64_t hle_nvnSamplerGetLodBias(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerGetLodBias(uint64_t s = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *samp = reinterpret_cast<NvnSamplerInternal *>(s)) {
+        float f = samp->desc.lod_bias;
+        uint32_t u;
+        std::memcpy(&u, &f, sizeof(u));
+        return u;
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerGetLodClamp(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerGetLodClamp(uint64_t s = 0, uint64_t out_min = 0, uint64_t out_max = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *samp = reinterpret_cast<NvnSamplerInternal *>(s)) {
+        if (out_min) *reinterpret_cast<float *>(out_min) = samp->desc.lod_min;
+        if (out_max) *reinterpret_cast<float *>(out_max) = samp->desc.lod_max;
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerGetMaxAnisotropy(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerGetMaxAnisotropy(uint64_t s = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *samp = reinterpret_cast<NvnSamplerInternal *>(s)) {
+        float f = samp->desc.max_anisotropy;
+        uint32_t u;
+        std::memcpy(&u, &f, sizeof(u));
+        return u;
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerGetMinMagFilter(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerGetMinMagFilter(uint64_t s = 0, uint64_t out_min = 0, uint64_t out_mag = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *samp = reinterpret_cast<NvnSamplerInternal *>(s)) {
+        if (out_min) *reinterpret_cast<uint32_t *>(out_min) = samp->desc.min_filter;
+        if (out_mag) *reinterpret_cast<uint32_t *>(out_mag) = samp->desc.mag_filter;
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerGetReductionFilter(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerGetReductionFilter(uint64_t s = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *samp = reinterpret_cast<NvnSamplerInternal *>(s)) {
+        return samp->desc.reduction_filter;
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerGetWrapMode(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerGetWrapMode(uint64_t s = 0, uint64_t out_s = 0, uint64_t out_t = 0, uint64_t out_r = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *samp = reinterpret_cast<NvnSamplerInternal *>(s)) {
+        if (out_s) *reinterpret_cast<uint32_t *>(out_s) = samp->desc.wrap_s;
+        if (out_t) *reinterpret_cast<uint32_t *>(out_t) = samp->desc.wrap_t;
+        if (out_r) *reinterpret_cast<uint32_t *>(out_r) = samp->desc.wrap_r;
+    }
     return 0;
 }
 
-static uint64_t hle_nvnSamplerInitialize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerInitialize(uint64_t s = 0, uint64_t b = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (s) {
+        auto *samp = reinterpret_cast<NvnSamplerInternal *>(s);
+        if (b) {
+            samp->desc = *reinterpret_cast<const NvnSamplerBuilderInternal *>(b);
+        }
+        static uint32_t s_sampler_id_gen = 1;
+        samp->sampler_id = s_sampler_id_gen++;
+        NvnBindlessManager::instance().register_sampler(samp->sampler_id, s, VK_NULL_HANDLE);
+    }
     return 1; // NVNboolean true
 }
 
@@ -2172,15 +2315,17 @@ static uint64_t hle_nvnSamplerPoolInitialize(uint64_t x0 = 0, uint64_t x1 = 0, u
     return 1; // NVNboolean true
 }
 
-static uint64_t hle_nvnSamplerPoolRegisterSampler(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerPoolRegisterSampler(uint64_t pool = 0, uint64_t id = 0, uint64_t sampler = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)pool; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().register_sampler(static_cast<uint32_t>(id), sampler);
     return 0;
 }
 
-static uint64_t hle_nvnSamplerPoolRegisterSamplerBuilder(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnSamplerPoolRegisterSamplerBuilder(uint64_t pool = 0, uint64_t id = 0, uint64_t builder = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)pool; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().register_sampler(static_cast<uint32_t>(id), builder);
     return 0;
 }
 
@@ -2198,12 +2343,20 @@ static uint64_t hle_nvnSamplerSetDebugLabel(uint64_t x0 = 0, uint64_t x1 = 0, ui
 
 static uint64_t hle_nvnSyncFinalize(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    auto *s = reinterpret_cast<NvnSyncInternal *>(x0);
+    if (s) s->magic = 0;
     return 0;
 }
 
 static uint32_t hle_nvnSyncInitialize(uint64_t sync, uint64_t dev) {
-    (void)sync; (void)dev;
+    (void)dev;
+    auto *s = reinterpret_cast<NvnSyncInternal *>(sync);
+    if (s) {
+        s->magic = 0x434E5953;
+        s->fenced = 0;
+        s->fence_value = 0;
+    }
     return 1;
 }
 
@@ -2214,7 +2367,11 @@ static uint64_t hle_nvnSyncSetDebugLabel(uint64_t x0 = 0, uint64_t x1 = 0, uint6
 }
 
 static int hle_nvnSyncWait(uint64_t sync, uint64_t timeout_ns) {
-    (void)sync; (void)timeout_ns;
+    (void)timeout_ns;
+    auto *s = reinterpret_cast<NvnSyncInternal *>(sync);
+    if (s && !s->fenced) {
+        return 1; // NVN_SYNC_WAIT_RESULT_TIMEOUT_EXPIRED
+    }
     return 0; // NVN_SYNC_WAIT_RESULT_ALREADY_SIGNALED
 }
 
@@ -2637,15 +2794,17 @@ static uint64_t hle_nvnTexturePoolInitialize(uint64_t x0 = 0, uint64_t x1 = 0, u
     return 1; // NVNboolean true
 }
 
-static uint64_t hle_nvnTexturePoolRegisterImage(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnTexturePoolRegisterImage(uint64_t pool = 0, uint64_t id = 0, uint64_t texture = 0, uint64_t view = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)pool; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().register_texture(static_cast<uint32_t>(id), texture, view);
     return 0;
 }
 
-static uint64_t hle_nvnTexturePoolRegisterTexture(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnTexturePoolRegisterTexture(uint64_t pool = 0, uint64_t id = 0, uint64_t texture = 0, uint64_t view = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)pool; (void)x4; (void)x5; (void)x6; (void)x7;
+    NvnBindlessManager::instance().register_texture(static_cast<uint32_t>(id), texture, view);
     return 0;
 }
 
@@ -2715,45 +2874,67 @@ static uint64_t hle_nvnTextureViewGetTarget(uint64_t x0 = 0, uint64_t x1 = 0, ui
     return 0;
 }
 
-static uint64_t hle_nvnTextureViewSetDefaults(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnTextureViewSetDefaults(uint64_t v = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (v) std::memset(reinterpret_cast<void *>(v), 0, sizeof(NvnTextureViewInternal));
     return 0;
 }
 
-static uint64_t hle_nvnTextureViewSetDepthStencilMode(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnTextureViewSetDepthStencilMode(uint64_t v = 0, uint64_t mode = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)v; (void)mode; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
     return 0;
 }
 
-static uint64_t hle_nvnTextureViewSetFormat(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnTextureViewSetFormat(uint64_t v = 0, uint64_t format = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *view = reinterpret_cast<NvnTextureViewInternal *>(v)) {
+        view->set_format = 1;
+        view->format = static_cast<uint32_t>(format);
+    }
     return 0;
 }
 
-static uint64_t hle_nvnTextureViewSetLayers(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnTextureViewSetLayers(uint64_t v = 0, uint64_t min_layer = 0, uint64_t nlayers = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *view = reinterpret_cast<NvnTextureViewInternal *>(v)) {
+        view->set_layers = 1;
+        view->min_layer = static_cast<uint32_t>(min_layer);
+        view->nlayers = static_cast<uint32_t>(nlayers);
+    }
     return 0;
 }
 
-static uint64_t hle_nvnTextureViewSetLevels(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnTextureViewSetLevels(uint64_t v = 0, uint64_t base_level = 0, uint64_t nlevels = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *view = reinterpret_cast<NvnTextureViewInternal *>(v)) {
+        view->set_levels = 1;
+        view->base_level = static_cast<uint32_t>(base_level);
+        view->nlevels = static_cast<uint32_t>(nlevels);
+    }
     return 0;
 }
 
-static uint64_t hle_nvnTextureViewSetSwizzle(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
-                                uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+static uint64_t hle_nvnTextureViewSetSwizzle(uint64_t v = 0, uint64_t r = 0, uint64_t g = 0, uint64_t b = 0,
+                                uint64_t a = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
+    (void)x5; (void)x6; (void)x7;
+    if (auto *view = reinterpret_cast<NvnTextureViewInternal *>(v)) {
+        view->swizzle = static_cast<uint16_t>(0x8000 | (r & 0x7) | ((g & 0x7) << 3) | ((b & 0x7) << 6) | ((a & 0x7) << 9));
+    }
     return 0;
 }
 
-static uint64_t hle_nvnTextureViewSetTarget(uint64_t x0 = 0, uint64_t x1 = 0, uint64_t x2 = 0, uint64_t x3 = 0,
+static uint64_t hle_nvnTextureViewSetTarget(uint64_t v = 0, uint64_t target = 0, uint64_t x2 = 0, uint64_t x3 = 0,
                                 uint64_t x4 = 0, uint64_t x5 = 0, uint64_t x6 = 0, uint64_t x7 = 0) {
-    (void)x0; (void)x1; (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    (void)x2; (void)x3; (void)x4; (void)x5; (void)x6; (void)x7;
+    if (auto *view = reinterpret_cast<NvnTextureViewInternal *>(v)) {
+        view->set_target = 1;
+        view->target = static_cast<uint32_t>(target);
+    }
     return 0;
 }
 
@@ -3153,6 +3334,8 @@ void *nvn_get_proc_address(const char *name) {
         {"nvnCommandBufferSetRenderEnableConditional", reinterpret_cast<void *>(&hle_nvnCommandBufferSetRenderEnableConditional)},
         {"nvnCommandBufferSetRenderTargets", reinterpret_cast<void *>(&hle_nvnCommandBufferSetRenderTargets)},
         {"nvnCommandBufferSetSampleMask", reinterpret_cast<void *>(&hle_nvnCommandBufferSetSampleMask)},
+        {"nvnCommandBufferBindSamplerPool", reinterpret_cast<void *>(&hle_nvnCommandBufferSetSamplerPool)},
+        {"nvnCommandBufferBindTexturePool", reinterpret_cast<void *>(&hle_nvnCommandBufferSetTexturePool)},
         {"nvnCommandBufferSetSamplerPool", reinterpret_cast<void *>(&hle_nvnCommandBufferSetSamplerPool)},
         {"nvnCommandBufferSetScissor", reinterpret_cast<void *>(&hle_nvnCommandBufferSetScissor)},
         {"nvnCommandBufferSetScissors", reinterpret_cast<void *>(&hle_nvnCommandBufferSetScissors)},
@@ -3197,6 +3380,7 @@ void *nvn_get_proc_address(const char *name) {
         {"nvnDeviceGetImageHandle", reinterpret_cast<void *>(&hle_nvnDeviceGetImageHandle)},
         {"nvnDeviceGetInteger", reinterpret_cast<void *>(&hle_nvnDeviceGetInteger)},
         {"nvnDeviceGetProcAddress", reinterpret_cast<void *>(&hle_nvnDeviceGetProcAddress)},
+        {"nvnDeviceGetSamplerHandle", reinterpret_cast<void *>(&hle_nvnDeviceGetSeparateSamplerHandle)},
         {"nvnDeviceGetSeparateSamplerHandle", reinterpret_cast<void *>(&hle_nvnDeviceGetSeparateSamplerHandle)},
         {"nvnDeviceGetSeparateTextureHandle", reinterpret_cast<void *>(&hle_nvnDeviceGetSeparateTextureHandle)},
         {"nvnDeviceGetTexelFetchHandle", reinterpret_cast<void *>(&hle_nvnDeviceGetTexelFetchHandle)},

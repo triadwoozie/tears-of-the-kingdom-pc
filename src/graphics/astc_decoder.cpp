@@ -81,12 +81,23 @@ static inline void blend_pixel_simde(uint8_t out[4], const uint8_t c0[4], const 
     *reinterpret_cast<uint32_t *>(out) = static_cast<uint32_t>(simde_mm_cvtsi128_si32(packed));
 }
 
+static inline uint8_t srgb_to_linear(uint8_t c) {
+    float f = static_cast<float>(c) / 255.0f;
+    if (f <= 0.04045f) {
+        f = f / 12.92f;
+    } else {
+        f = std::pow((f + 0.055f) / 1.055f, 2.4f);
+    }
+    return static_cast<uint8_t>(std::clamp(f * 255.0f + 0.5f, 0.0f, 255.0f));
+}
+
 bool AstcDecoder::decompress_block(
     const uint8_t block_bytes[16],
     uint32_t block_w,
     uint32_t block_h,
     uint8_t *out_block_pixels,
-    uint32_t row_pitch_bytes
+    uint32_t row_pitch_bytes,
+    bool is_srgb
 ) {
     if (!block_bytes || !out_block_pixels || block_w == 0 || block_h == 0) return false;
 
@@ -98,6 +109,12 @@ bool AstcDecoder::decompress_block(
         uint8_t g = block_bytes[11];
         uint8_t b = block_bytes[13];
         uint8_t a = block_bytes[15];
+
+        if (is_srgb) {
+            r = srgb_to_linear(r);
+            g = srgb_to_linear(g);
+            b = srgb_to_linear(b);
+        }
 
         for (uint32_t y = 0; y < block_h; y++) {
             uint8_t *row = out_block_pixels + y * row_pitch_bytes;
@@ -123,6 +140,11 @@ bool AstcDecoder::decompress_block(
                 int weight = (total_steps > 0) ? (static_cast<int>(x + y) * 64 / total_steps) : 0;
                 weight = std::clamp(weight, 0, 64);
                 blend_pixel_simde(&row[x * 4], c0, c1, weight);
+                if (is_srgb) {
+                    row[x * 4 + 0] = srgb_to_linear(row[x * 4 + 0]);
+                    row[x * 4 + 1] = srgb_to_linear(row[x * 4 + 1]);
+                    row[x * 4 + 2] = srgb_to_linear(row[x * 4 + 2]);
+                }
             }
         }
         return true;
@@ -145,6 +167,11 @@ bool AstcDecoder::decompress_block(
                 weight = static_cast<int>(x * 64 / (block_w - 1));
             }
             blend_pixel_simde(&row[x * 4], c0, c1, weight);
+            if (is_srgb) {
+                row[x * 4 + 0] = srgb_to_linear(row[x * 4 + 0]);
+                row[x * 4 + 1] = srgb_to_linear(row[x * 4 + 1]);
+                row[x * 4 + 2] = srgb_to_linear(row[x * 4 + 2]);
+            }
         }
     }
 
@@ -158,7 +185,8 @@ bool AstcDecoder::decompress_image(
     uint32_t height,
     uint32_t block_w,
     uint32_t block_h,
-    uint8_t *out_rgba
+    uint8_t *out_rgba,
+    bool is_srgb
 ) {
     if (!astc_data || !out_rgba || width == 0 || height == 0 || block_w == 0 || block_h == 0) {
         return false;
@@ -187,11 +215,11 @@ bool AstcDecoder::decompress_image(
             uint32_t cur_h = std::min(block_h, height - pixel_y);
 
             if (cur_w == block_w && cur_h == block_h) {
-                decompress_block(block_src, block_w, block_h, block_dst, row_pitch);
+                decompress_block(block_src, block_w, block_h, block_dst, row_pitch, is_srgb);
             } else {
                 // Border block: decode to scratch buffer and copy sub-rectangle
                 uint8_t scratch[12 * 12 * 4];
-                decompress_block(block_src, block_w, block_h, scratch, block_w * 4);
+                decompress_block(block_src, block_w, block_h, scratch, block_w * 4, is_srgb);
                 for (uint32_t y = 0; y < cur_h; y++) {
                     std::memcpy(block_dst + y * row_pitch, scratch + y * block_w * 4, cur_w * 4);
                 }

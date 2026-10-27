@@ -67,6 +67,7 @@ endif()
 
 # TotK Runtime Library
 add_library(totk_recomp_runtime STATIC
+    src/runtime/runtime_config.cpp
     src/runtime/paths.c
     src/runtime/memory_manager.cpp
     src/runtime/kernel_hle.cpp
@@ -77,6 +78,10 @@ add_library(totk_recomp_runtime STATIC
     src/runtime/audio_hle.cpp
     src/runtime/video_hle.cpp
     src/runtime/module_loader.cpp
+    src/runtime/game_framework_hle.cpp
+    src/runtime/hid_hle.cpp
+    src/runtime/byml_bfres_parser.cpp
+    src/runtime/game_patches_v143.c
     ${PLATFORM_SOURCES}
 )
 target_include_directories(totk_recomp_runtime PUBLIC
@@ -86,7 +91,7 @@ target_include_directories(totk_recomp_runtime PUBLIC
 )
 target_link_libraries(totk_recomp_runtime PUBLIC SDL3::SDL3)
 if(NOT MSVC)
-    target_link_libraries(totk_recomp_runtime PUBLIC m dl pthread)
+    target_link_libraries(totk_recomp_runtime PUBLIC m dl pthread zstd)
 endif()
 
 # TotK Recompiler Library
@@ -110,6 +115,11 @@ add_library(totk_recomp_graphics STATIC
     src/graphics/nvn_conditional_draw.cpp
     src/graphics/nvn_texture_cache.cpp
     src/graphics/astc_decoder.cpp
+    src/graphics/bnsh_parser.cpp
+    src/graphics/maxwell_to_spirv.cpp
+    src/graphics/nvn_bindless.cpp
+    src/graphics/nvn_render_states.cpp
+    src/graphics/bc_decoder.cpp
 )
 target_include_directories(totk_recomp_graphics PUBLIC
     src/
@@ -156,7 +166,7 @@ target_link_libraries(totk_recomp PRIVATE
     SDL3::SDL3
 )
 if(NOT MSVC)
-    target_link_libraries(totk_recomp PRIVATE m dl pthread)
+    target_link_libraries(totk_recomp PRIVATE m dl pthread zstd)
 endif()
 set_target_properties(totk_recomp PROPERTIES ENABLE_EXPORTS ON)
 
@@ -186,7 +196,7 @@ function(add_totk_test TEST_NAME TEST_SRC)
         SDL3::SDL3
     )
     if(NOT MSVC)
-        target_link_libraries(${TEST_NAME} PRIVATE m dl pthread)
+        target_link_libraries(${TEST_NAME} PRIVATE m dl pthread zstd)
     endif()
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
 endfunction()
@@ -201,3 +211,5 @@ add_totk_test(test_module_loader tests/test_module_loader.cpp)
 add_totk_test(test_fs_ipc tests/test_fs_ipc.cpp)
 add_totk_test(test_astc_decoder tests/test_astc_decoder.cpp)
 add_totk_test(test_ui_config tests/test_ui_config.cpp)
+add_totk_test(test_maxwell_spirv tests/test_maxwell_spirv.cpp)
+add_totk_test(test_byml_bfres tests/test_byml_bfres.cpp)

@@ -1,5 +1,6 @@
 #include "nvn_texture_cache.h"
 #include "astc_decoder.h"
+#include "bc_decoder.h"
 #include <cstdio>
 #include <cstring>
 
@@ -81,13 +82,37 @@ CachedTexture *NvnTextureCache::get_or_create_texture(uint64_t guest_addr, uint3
     return &textures_[guest_addr];
 }
 
-void NvnTextureCache::decompress_astc_to_rgba8(const uint8_t *astc_in, uint8_t *rgba_out, uint32_t width, uint32_t height) {
-    if (!astc_in || !rgba_out || width == 0 || height == 0) return;
-    uint32_t blocks_x = (width + 3) / 4;
-    uint32_t blocks_y = (height + 3) / 4;
+void NvnTextureCache::decompress_astc_to_rgba8(const uint8_t *astc_in, uint8_t *rgba_out, uint32_t width, uint32_t height, uint32_t block_w, uint32_t block_h, bool is_srgb) {
+    if (!astc_in || !rgba_out || width == 0 || height == 0 || block_w == 0 || block_h == 0) return;
+    uint32_t blocks_x = (width + block_w - 1) / block_w;
+    uint32_t blocks_y = (height + block_h - 1) / block_h;
     size_t data_size = static_cast<size_t>(blocks_x) * blocks_y * 16;
-    if (!AstcDecoder::decompress_image(astc_in, data_size, width, height, 4, 4, rgba_out)) {
+    if (!AstcDecoder::decompress_image(astc_in, data_size, width, height, block_w, block_h, rgba_out, is_srgb)) {
         std::memset(rgba_out, 0xFF, width * height * 4);
+    }
+}
+
+void NvnTextureCache::decompress_bc_to_rgba8(TextureFormat fmt, const uint8_t *bc_in, uint8_t *rgba_out, uint32_t width, uint32_t height) {
+    if (!bc_in || !rgba_out || width == 0 || height == 0) return;
+    switch (fmt) {
+        case TextureFormat::BC1_RGBA_UNORM:
+            BcDecoder::decode_bc1(bc_in, width, height, rgba_out);
+            break;
+        case TextureFormat::BC3_RGBA_UNORM:
+            BcDecoder::decode_bc3(bc_in, width, height, rgba_out);
+            break;
+        case TextureFormat::BC4_UNORM:
+            BcDecoder::decode_bc4(bc_in, width, height, rgba_out);
+            break;
+        case TextureFormat::BC5_UNORM:
+            BcDecoder::decode_bc5(bc_in, width, height, rgba_out);
+            break;
+        case TextureFormat::BC7_UNORM:
+            BcDecoder::decode_bc7(bc_in, width, height, rgba_out);
+            break;
+        default:
+            std::memset(rgba_out, 0xFF, width * height * 4);
+            break;
     }
 }
 

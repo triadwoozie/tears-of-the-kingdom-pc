@@ -1,0 +1,1130 @@
+diff --git a/src/gfx/backend_vk.c b/src/gfx/backend_vk.c
+index 3fd1c77..37327a8 100644
+--- a/src/gfx/backend_vk.c
++++ b/src/gfx/backend_vk.c
+@@ -11,7 +11,9 @@
+ #include <stdatomic.h>
+ #include <stdlib.h>
+ #include <string.h>
++#ifdef _WIN32
+ #include <windows.h>
++#endif
+ 
+ #include "compat/gfx_compat.h"
+ #include "host/hle.h"
+@@ -48,7 +50,7 @@ static int g_npools, g_capools;
+ static vkb_rw g_pool_mu;   // recording threads look pools up for every draw (read); changes write
+ static uint64_t g_pool_bytes;
+ 
+-// vkb_lock.h: Windows slim reader-writer locks (zero-initialised = unlocked), with the wait measured as vkb_lock does
++#ifdef _WIN32
+ void vkb_rw_read(vkb_rw *l, int kind) {
+     if (TryAcquireSRWLockShared((PSRWLOCK)l)) return;
+     uint64_t t0 = runtime_now_ns();
+@@ -65,6 +67,21 @@ void vkb_rw_write(vkb_rw *l, int kind) {
+     atomic_fetch_add_explicit(&vkb_lock_waits[kind], 1, memory_order_relaxed);
+ }
+ void vkb_rw_write_end(vkb_rw *l) { ReleaseSRWLockExclusive((PSRWLOCK)l); }
++#else
++#include <pthread.h>
++static pthread_rwlock_t *get_rw(vkb_rw *l) {
++    if (!l->opaque) {
++        pthread_rwlock_t *rw = (pthread_rwlock_t *)calloc(1, sizeof(pthread_rwlock_t));
++        pthread_rwlock_init(rw, NULL);
++        l->opaque = rw;
++    }
++    return (pthread_rwlock_t *)l->opaque;
++}
++void vkb_rw_read(vkb_rw *l, int kind) { (void)kind; pthread_rwlock_rdlock(get_rw(l)); }
++void vkb_rw_read_end(vkb_rw *l) { pthread_rwlock_unlock(get_rw(l)); }
++void vkb_rw_write(vkb_rw *l, int kind) { (void)kind; pthread_rwlock_wrlock(get_rw(l)); }
++void vkb_rw_write_end(vkb_rw *l) { pthread_rwlock_unlock(get_rw(l)); }
++#endif
+ 
+ // ---- per recording thread (vkb_mt.c design, implemented below in "several recording threads")
+ static __thread int t_worker;          // vkb_worker(): 0 the translation thread (and any other), 1.. the recording threads
+@@ -127,9 +144,13 @@ void mtl_pool_add(const void *mem, uint64_t size) {
+     uintptr_t lo = (uintptr_t)mem, hi = lo + size, a = lo & ~(align - 1), b = (hi + align - 1) & ~(align - 1);
+     // The import needs committed memory: guest pages are committed on first touch, so the pool is committed now.
+     // A virtual pool is an inaccessible address range (totk_vpool_win.c): no memory to import (sparse binding, later).
++#ifdef _WIN32
+     MEMORY_BASIC_INFORMATION mi;
+     if (a >= GUEST_LO && b <= GUEST_HI) plat_commit(a, b - a);
+     else if (!VirtualQuery((void *)a, &mi, sizeof mi) || mi.State != MEM_COMMIT || mi.Protect == PAGE_NOACCESS) return;
++#else
++    if (a >= GUEST_LO && b <= GUEST_HI) plat_commit(a, b - a);
++#endif
+     VkMemoryHostPointerPropertiesEXT hp = {VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT};
+     if (!vk_check(vk.vkGetMemoryHostPointerPropertiesEXT(vkc.device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+                                                           (void *)a, &hp), "host pointer properties")) return;
+@@ -598,6 +619,7 @@ static void checkpoint_report(void) {
+         VLOG("  stage %#llx: #%u present %llu %s %s %s", (unsigned long long)d[i].stage, c->n, (unsigned long long)c->frame, c->what, c->k1, c->k2);
+         unsigned long long a = strtoull(c->k1, NULL, 16);
+         if (a) {   // an address: what the memory and the pool table hold now
++#ifdef _WIN32
+             MEMORY_BASIC_INFORMATION mi = {0};
+             VirtualQuery((void *)(uintptr_t)a, &mi, sizeof mi);
+             vkb_rw_read(&g_pool_mu, LK_POOLS);
+@@ -605,6 +627,12 @@ static void checkpoint_report(void) {
+             VLOG("    memory %#llx: state %#lx protect %#lx region %p+%#llx; pool %s %#llx..%#llx", a, mi.State, mi.Protect, mi.BaseAddress,
+                  (unsigned long long)mi.RegionSize, p ? "registered" : "none", p ? (unsigned long long)p->lo : 0ull, p ? (unsigned long long)p->hi : 0ull);
+             vkb_rw_read_end(&g_pool_mu);
++#else
++            vkb_rw_read(&g_pool_mu, LK_POOLS);
++            const pool_ent *p = pool_find((uintptr_t)a, 1);
++            VLOG("    memory %#llx: pool %s %#llx..%#llx", a, p ? "registered" : "none", p ? (unsigned long long)p->lo : 0ull, p ? (unsigned long long)p->hi : 0ull);
++            vkb_rw_read_end(&g_pool_mu);
++#endif
+         }
+     }
+ }
+@@ -1654,9 +1682,14 @@ static wpool_t g_wp[SLOTS][VKB_MAXREC + 1];
+ int vkb_mt_on(void) {
+     static int n = -1;
+     if (n < 0) {
++#ifdef _WIN32
+         SYSTEM_INFO si;
+         GetSystemInfo(&si);
+         int cpus = (int)si.dwNumberOfProcessors;
++#else
++        int cpus = (int)sysconf(_SC_NPROCESSORS_ONLN);
++        if (cpus < 1) cpus = 4;
++#endif
+         const char *e = getenv("TOTK_VK_RECORD_THREADS");
+         n = e && *e ? atoi(e) : cpus >= 8 ? 4 : cpus >= 4 ? 2 : 1;
+         if (n > VKB_MAXREC) n = VKB_MAXREC;
+diff --git a/src/gfx/compat/gfx_compat.h b/src/gfx/compat/gfx_compat.h
+index f8706a5..04c4c3d 100644
+--- a/src/gfx/compat/gfx_compat.h
++++ b/src/gfx/compat/gfx_compat.h
+@@ -7,6 +7,9 @@
+ // - sigsetjmp guards: plain setjmp (guest pages are committed on first touch, so guarded guest reads do not fault).
+ // - malloc_size: _msize.
+ #pragma once
++#ifndef _GNU_SOURCE
++#define _GNU_SOURCE
++#endif
+ #include <setjmp.h>
+ #include <signal.h>
+ #include <stdint.h>
+@@ -14,6 +17,9 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <pthread.h>
++#ifdef __linux__
++int pthread_setname_np(pthread_t thread, const char *name);
++#endif
+ #include <sched.h>
+ #include <time.h>
+ #include <malloc.h>
+@@ -88,7 +94,11 @@ struct rusage { struct { long tv_sec, tv_usec; } ru_utime, ru_stime; long ru_max
+ static inline int getrusage(int who, struct rusage *r) { (void)who; memset(r, 0, sizeof *r); return -1; }
+ 
+ // ---- memory
++#ifdef __linux__
++#define malloc_size(p) malloc_usable_size(p)
++#else
+ #define malloc_size(p) _msize(p)
++#endif
+ #define PROT_NONE 0
+ #define PROT_READ 1
+ #define PROT_WRITE 2
+@@ -98,15 +108,22 @@ static inline int getrusage(int who, struct rusage *r) { (void)who; memset(r, 0,
+ static inline void *mmap(void *a, size_t n, int p, int f, int fd, long o) { (void)a; (void)n; (void)p; (void)f; (void)fd; (void)o; return MAP_FAILED; }
+ static inline int munmap(void *a, size_t n) { (void)a; (void)n; return -1; }
+ static inline int mprotect(void *a, size_t n, int p) { (void)a; (void)n; (void)p; return -1; }
++#ifndef __linux__
+ static inline int getpagesize(void) { return 4096; }
++#endif
+ 
+ // ---- threads: macOS names only the calling thread
+ static inline int gfx_setname(const char *n) { return pthread_setname_np(pthread_self(), n); }
+ #define pthread_setname_np(n) gfx_setname(n)
+ 
+ // ---- more Darwin calls: the thread id and per-clock nanoseconds
++#ifdef __linux__
++#include <sys/syscall.h>
++static inline int pthread_threadid_np(void *t, uint64_t *id) { (void)t; *id = (uint64_t)syscall(SYS_gettid); return 0; }
++#elif defined(_WIN32)
+ unsigned long __stdcall GetCurrentThreadId(void);
+ static inline int pthread_threadid_np(void *t, uint64_t *id) { (void)t; *id = GetCurrentThreadId(); return 0; }
++#endif
+ static inline uint64_t clock_gettime_nsec_np(clockid_t clk) {
+     struct timespec ts;
+     if (clock_gettime(clk, &ts)) return 0;
+diff --git a/src/gfx/nvn/nvn_impl.h b/src/gfx/nvn/nvn_impl.h
+index b5e665d..d8a35f2 100644
+--- a/src/gfx/nvn/nvn_impl.h
++++ b/src/gfx/nvn/nvn_impl.h
+@@ -1,34 +1,43 @@
+-// NVN implementation registration macros shared by hle_nvn.c and TOTK extension files.
+-// [Windows port] Registered in PE sections .nvni$m / .nvnx$m between the markers of nvn_registry.c.
+-#pragma once
+-#include "nvn_protos.h"
+-
+-// TOTK: NVN entry points that wait for the GPU, the display or other threads give up the caller's virtual core for
+-// their duration (runtime/threads.c), as the Horizon thread would block there.
+-int runtime_core_away(void);
+-void runtime_core_back(int *away);
+-#define NVN_BLOCKING() __attribute__((cleanup(runtime_core_back))) int totk_core_away_ = runtime_core_away()
+-
+-typedef struct { const char *name; void *fn; } nvn_impl;
+-#define NVN(name, ret, ...)                                                                       \
+-    static ret h_##name(__VA_ARGS__);                                                             \
+-    static const NVNT_##name chk_##name __attribute__((unused)) = h_##name;                       \
+-    __attribute__((used, section(".nvni$m"))) static const nvn_impl e_##name = {#name, (void *)h_##name}; \
+-    static ret h_##name(__VA_ARGS__)
+-// 无原型的新版接口：不做签名检查
+-// Newer interfaces without prototypes: no signature check
+-#define NVN_NOPROTO(name, ret, ...)                                                               \
+-    static ret h_##name(__VA_ARGS__);                                                             \
+-    __attribute__((used, section(".nvni$m"))) static const nvn_impl e_##name = {#name, (void *)h_##name}; \
+-    static ret h_##name(__VA_ARGS__)
+-
+-
+-// TOTK: entry points the game asks nvnDeviceGetProcAddress / nvnBootstrapLoader for that are not in main's
+-// name table (no counting thunk). They are returned directly by nvn_lookup.
+-#define NVN_EXTRA(name, ret, ...)                                                                 \
+-    static ret x_##name(__VA_ARGS__);                                                             \
+-    __attribute__((used, section(".nvnx$m"))) static const nvn_impl ex_##name = {#name, (void *)x_##name}; \
+-    static ret x_##name(__VA_ARGS__)
++// NVN implementation registration macros shared by hle_nvn.c and TOTK extension files.
++// [Windows port] Registered in PE sections .nvni$m / .nvnx$m between the markers of nvn_registry.c.
++#pragma once
++#include "nvn_protos.h"
++
++// TOTK: NVN entry points that wait for the GPU, the display or other threads give up the caller's virtual core for
++// their duration (runtime/threads.c), as the Horizon thread would block there.
++int runtime_core_away(void);
++void runtime_core_back(int *away);
++#define NVN_BLOCKING() __attribute__((cleanup(runtime_core_back))) int totk_core_away_ = runtime_core_away()
++
++typedef struct { const char *name; void *fn; } nvn_impl;
++
++#if defined(__linux__)
++#define NVN_SECTION_IMPL "nvni"
++#define NVN_SECTION_EXTRA "nvnx"
++#else
++#define NVN_SECTION_IMPL ".nvni$m"
++#define NVN_SECTION_EXTRA ".nvnx$m"
++#endif
++
++#define NVN(name, ret, ...)                                                                       \
++    static ret h_##name(__VA_ARGS__);                                                             \
++    static const NVNT_##name chk_##name __attribute__((unused)) = h_##name;                       \
++    __attribute__((used, section(NVN_SECTION_IMPL))) static const nvn_impl e_##name = {#name, (void *)h_##name}; \
++    static ret h_##name(__VA_ARGS__)
++// 无原型的新版接口：不做签名检查
++// Newer interfaces without prototypes: no signature check
++#define NVN_NOPROTO(name, ret, ...)                                                               \
++    static ret h_##name(__VA_ARGS__);                                                             \
++    __attribute__((used, section(NVN_SECTION_IMPL))) static const nvn_impl e_##name = {#name, (void *)h_##name}; \
++    static ret h_##name(__VA_ARGS__)
++
++
++// TOTK: entry points the game asks nvnDeviceGetProcAddress / nvnBootstrapLoader for that are not in main's
++// name table (no counting thunk). They are returned directly by nvn_lookup.
++#define NVN_EXTRA(name, ret, ...)                                                                 \
++    static ret x_##name(__VA_ARGS__);                                                             \
++    __attribute__((used, section(NVN_SECTION_EXTRA))) static const nvn_impl ex_##name = {#name, (void *)x_##name}; \
++    static ret x_##name(__VA_ARGS__)
+ 
+ // [Windows port] nvn_registry.c
+ const nvn_impl *nvn_registry_impls(unsigned *n);
+diff --git a/src/gfx/nvn/nvn_registry.c b/src/gfx/nvn/nvn_registry.c
+index a40f3d5..1aee291 100644
+--- a/src/gfx/nvn/nvn_registry.c
++++ b/src/gfx/nvn/nvn_registry.c
+@@ -5,6 +5,23 @@
+ #include "../host/hle.h"
+ #include "nvn_impl.h"
+ 
++#if defined(__linux__)
++extern const nvn_impl __start_nvni[] __attribute__((weak));
++extern const nvn_impl __stop_nvni[] __attribute__((weak));
++extern const nvn_impl __start_nvnx[] __attribute__((weak));
++extern const nvn_impl __stop_nvnx[] __attribute__((weak));
++
++const nvn_impl *nvn_registry_impls(unsigned *n) {
++    if (!__start_nvni || !__stop_nvni) { *n = 0; return NULL; }
++    *n = (unsigned)(__stop_nvni - __start_nvni);
++    return __start_nvni;
++}
++const nvn_impl *nvn_registry_extras(unsigned *n) {
++    if (!__start_nvnx || !__stop_nvnx) { *n = 0; return NULL; }
++    *n = (unsigned)(__stop_nvnx - __start_nvnx);
++    return __start_nvnx;
++}
++#else
+ // The linker sorts .nvni$a < .nvni$m (NVN / NVN_NOPROTO entries) < .nvni$z by the text after '$'; likewise .nvnx.
+ __attribute__((section(".nvni$a"), used)) static const nvn_impl impls_start[1];
+ __attribute__((section(".nvni$z"), used)) static const nvn_impl impls_stop[1];
+@@ -20,6 +37,7 @@ static const nvn_impl *range(const nvn_impl *a, const nvn_impl *b, unsigned *n)
+ }
+ const nvn_impl *nvn_registry_impls(unsigned *n) { return range(impls_start, impls_stop, n); }
+ const nvn_impl *nvn_registry_extras(unsigned *n) { return range(extras_start, extras_stop, n); }
++#endif
+ 
+ // The native implementation of an NVN name (the thunks call it).
+ void *nvn_impl_fn(const char *name, int extra) {
+diff --git a/src/gfx/nvn/totk_timeline_win.c b/src/gfx/nvn/totk_timeline_win.c
+index d605714..d67c873 100644
+--- a/src/gfx/nvn/totk_timeline_win.c
++++ b/src/gfx/nvn/totk_timeline_win.c
+@@ -1,3 +1,11 @@
++#include <stdint.h>
++#ifndef _WIN32
++#include <unistd.h>
++#include <sys/syscall.h>
++static inline uint32_t GetCurrentThreadId(void) {
++    return (uint32_t)syscall(SYS_gettid);
++}
++#endif
+ // [Windows port] One-frame-chain timeline (totk_timeline.h), from MacNativeGames' totk_timeline.c (MIT). Changes: the
+ // host clock is runtime_now_ns (QueryPerformanceCounter), thread ids from GetCurrentThreadId; GPU spans come from the
+ // Vulkan back end (a timestamp at the start and end of each command buffer, placed so that it ends when the retire thread
+@@ -6,7 +14,9 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#ifdef _WIN32
+ #include <windows.h>
++#endif
+ 
+ #include "totk_timeline.h"
+ 
+diff --git a/src/gfx/nvn/totk_vpool_win.c b/src/gfx/nvn/totk_vpool_win.c
+index 580c9f3..e2612f2 100644
+--- a/src/gfx/nvn/totk_vpool_win.c
++++ b/src/gfx/nvn/totk_vpool_win.c
+@@ -1,3 +1,26 @@
++#define _GNU_SOURCE
++#include <stdint.h>
++#ifndef _WIN32
++#include <sys/mman.h>
++#define MEM_RESERVE 0x2000
++#define MEM_COMMIT 0x1000
++#define MEM_RELEASE 0x8000
++#define PAGE_READWRITE 0x04
++#define PAGE_NOACCESS 0x01
++#ifndef MAP_ANONYMOUS
++#define MAP_ANONYMOUS 0x20
++#endif
++static inline void *VirtualAlloc(void *addr, size_t size, int type, int prot) {
++    int p = (prot == PAGE_NOACCESS) ? PROT_NONE : (PROT_READ | PROT_WRITE);
++    void *res = mmap(addr, size, p, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++    return (res == MAP_FAILED) ? NULL : res;
++}
++static inline int VirtualFree(void *addr, size_t size, int type) {
++    (void)size; (void)type;
++    return munmap(addr, size);
++}
++static inline unsigned long GetLastError(void) { return 0; }
++#endif
+ // [Windows port] NVN physical / virtual memory pools (the API of MacNativeGames' totk_vpool.h).
+ // MacNativeGames maps a virtual pool's 64 KiB pages onto physical pools' pages a second time (mach_vm_remap). Windows
+ // cannot alias ordinary private memory, and a virtual pool is a GPU address range: the game reaches the physical memory
+@@ -9,7 +32,9 @@
+ #include <stdatomic.h>
+ #include <stdlib.h>
+ #include <string.h>
++#ifdef _WIN32
+ #include <windows.h>
++#endif
+ 
+ #include "../host/hle.h"
+ #include "nvn_dirty.h"
+diff --git a/src/gfx/vkb_audit.c b/src/gfx/vkb_audit.c
+index 06248b1..8a5f98e 100644
+--- a/src/gfx/vkb_audit.c
++++ b/src/gfx/vkb_audit.c
+@@ -1,10 +1,15 @@
+ // Fidelity audit of the Vulkan NVN replayer: counting of substitutions and skips (vkb_audit.h).
+ // Counting is always on (array increments on the replay thread); the per-shader tables and the report only within
+ // a TOTK_AUDIT window.
+-#include <direct.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#ifdef _WIN32
++#include <direct.h>
++#else
++#include <sys/stat.h>
++#define _mkdir(path) mkdir(path, 0777)
++#endif
+ 
+ #include "compat/gfx_compat.h"
+ #include "host/hle.h"
+diff --git a/src/gfx/vkb_bc7.c b/src/gfx/vkb_bc7.c
+index 339596e..9dab1a1 100644
+--- a/src/gfx/vkb_bc7.c
++++ b/src/gfx/vkb_bc7.c
+@@ -11,12 +11,20 @@
+ // BC1: the interface's 12x12 ASTC maps when opaque (tools/bc7build: a texture is BC1 only if none of its texels is
+ // transparent; half the bytes of BC7, and 12x12 ASTC holds less detail than BC1 keeps). Nothing from the game is
+ // in the repository or a build: the cache is made on the player's machine from the player's copy (README.md, Legal).
+-#include <direct.h>
+ #include <stdatomic.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#ifdef _WIN32
++#include <direct.h>
+ #include <windows.h>
++#else
++#include <sys/stat.h>
++#include <unistd.h>
++#define _mkdir(path) mkdir(path, 0777)
++#define _fseeki64(file, offset, origin) fseeko(file, offset, origin)
++#define _ftelli64(file) ftello(file)
++#endif
+ 
+ #include "compat/gfx_compat.h"
+ #include "host/hle.h"
+@@ -147,7 +155,9 @@ static int quality(void) {   // TOTK_BC7_QUALITY=0..4 (bc7enc's uber level; back
+ static void *encoder(void *unused) {
+     (void)unused;
+     pthread_setname_np("totk-bc7");
++#ifdef _WIN32
+     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);   // the game's and the recording threads come first
++#endif
+     for (;;) {
+         pthread_mutex_lock(&g_jmu);
+         while (!g_jobs) pthread_cond_wait(&g_jcv, &g_jmu);
+diff --git a/src/gfx/vkb_shader.c b/src/gfx/vkb_shader.c
+index 2500525..58b2c7c 100644
+--- a/src/gfx/vkb_shader.c
++++ b/src/gfx/vkb_shader.c
+@@ -10,8 +10,10 @@
+ //    own layout): +0 Ryujinx support buffer, +1..17 constant buffers c0-c16, +18..33 storage buffers, +34..57 combined
+ //    textures, +58..61 images. The translator numbers bindings densely per shader; they are rewritten in the SPIR-V
+ //    when it is loaded, so any vertex shader combines with any fragment shader under one pipeline layout.
++#ifdef _WIN32
+ #include <windows.h>
+ #include <bcrypt.h>   // after windows.h (its types)
++#endif
+ #include <stdatomic.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -112,6 +114,7 @@ static shentry *g_tab[4096];
+ static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
+ static uint64_t g_loaded, g_missing;
+ 
++#ifdef _WIN32
+ static BCRYPT_ALG_HANDLE g_sha;   // opened once (opening it per hash cost more than the hash)
+ static void sha_open(void) { if (BCryptOpenAlgorithmProvider(&g_sha, BCRYPT_SHA256_ALGORITHM, NULL, 0)) die("SHA-256 provider"); }
+ static void sha256_hex(const void *a, size_t na, const void *b, size_t nb, char out[65]) {
+@@ -129,6 +132,111 @@ static void sha256_hex(const void *a, size_t na, const void *b, size_t nb, char
+     for (int i = 0; i < 32; i++) { out[2 * i] = hex[md[i] >> 4]; out[2 * i + 1] = hex[md[i] & 15]; }
+     out[64] = 0;
+ }
++#else
++typedef struct {
++    uint32_t state[8];
++    uint64_t count;
++    uint8_t buffer[64];
++} sha256_ctx;
++
++static inline uint32_t ror32_s(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
++
++static void sha256_transform(uint32_t state[8], const uint8_t data[64]) {
++    static const uint32_t K[64] = {
++        0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
++        0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
++        0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
++        0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
++        0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
++        0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
++        0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
++        0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
++    };
++    uint32_t W[64];
++    for (int i = 0; i < 16; i++) {
++        W[i] = ((uint32_t)data[i*4] << 24) | ((uint32_t)data[i*4 + 1] << 16) |
++               ((uint32_t)data[i*4 + 2] << 8) | ((uint32_t)data[i*4 + 3]);
++    }
++    for (int i = 16; i < 64; i++) {
++        uint32_t s0 = ror32_s(W[i-15], 7) ^ ror32_s(W[i-15], 18) ^ (W[i-15] >> 3);
++        uint32_t s1 = ror32_s(W[i-2], 17) ^ ror32_s(W[i-2], 19) ^ (W[i-2] >> 10);
++        W[i] = W[i-16] + s0 + W[i-7] + s1;
++    }
++    uint32_t a = state[0], b = state[1], c = state[2], d = state[3];
++    uint32_t e = state[4], f = state[5], g = state[6], h = state[7];
++    for (int i = 0; i < 64; i++) {
++        uint32_t S1 = ror32_s(e, 6) ^ ror32_s(e, 11) ^ ror32_s(e, 25);
++        uint32_t ch = (e & f) ^ ((~e) & g);
++        uint32_t temp1 = h + S1 + ch + K[i] + W[i];
++        uint32_t S0 = ror32_s(a, 2) ^ ror32_s(a, 13) ^ ror32_s(a, 22);
++        uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
++        uint32_t temp2 = S0 + maj;
++        h = g; g = f; e = d + temp1; d = c; c = b; b = a; a = temp1 + temp2;
++    }
++    state[0] += a; state[1] += b; state[2] += c; state[3] += d;
++    state[4] += e; state[5] += f; state[6] += g; state[7] += h;
++}
++
++static void sha256_init_s(sha256_ctx *ctx) {
++    ctx->state[0] = 0x6a09e667; ctx->state[1] = 0xbb67ae85;
++    ctx->state[2] = 0x3c6ef372; ctx->state[3] = 0xa54ff53a;
++    ctx->state[4] = 0x510e527f; ctx->state[5] = 0x9b05688c;
++    ctx->state[6] = 0x1f83d9ab; ctx->state[7] = 0x5be0cd19;
++    ctx->count = 0;
++}
++
++static void sha256_update_s(sha256_ctx *ctx, const void *data, size_t len) {
++    const uint8_t *p = (const uint8_t *)data;
++    size_t idx = (size_t)(ctx->count & 63);
++    ctx->count += len;
++    while (len > 0) {
++        size_t take = 64 - idx;
++        if (take > len) take = len;
++        memcpy(&ctx->buffer[idx], p, take);
++        p += take;
++        len -= take;
++        idx += take;
++        if (idx == 64) {
++            sha256_transform(ctx->state, ctx->buffer);
++            idx = 0;
++        }
++    }
++}
++
++static void sha256_final_s(sha256_ctx *ctx, uint8_t hash[32]) {
++    size_t idx = (size_t)(ctx->count & 63);
++    ctx->buffer[idx++] = 0x80;
++    if (idx > 56) {
++        memset(&ctx->buffer[idx], 0, 64 - idx);
++        sha256_transform(ctx->state, ctx->buffer);
++        idx = 0;
++    }
++    memset(&ctx->buffer[idx], 0, 56 - idx);
++    uint64_t bits = ctx->count * 8;
++    for (int i = 0; i < 8; i++) {
++        ctx->buffer[56 + i] = (uint8_t)(bits >> ((7 - i) * 8));
++    }
++    sha256_transform(ctx->state, ctx->buffer);
++    for (int i = 0; i < 8; i++) {
++        hash[i*4 + 0] = (uint8_t)(ctx->state[i] >> 24);
++        hash[i*4 + 1] = (uint8_t)(ctx->state[i] >> 16);
++        hash[i*4 + 2] = (uint8_t)(ctx->state[i] >> 8);
++        hash[i*4 + 3] = (uint8_t)(ctx->state[i]);
++    }
++}
++
++static void sha256_hex(const void *a, size_t na, const void *b, size_t nb, char out[65]) {
++    sha256_ctx ctx;
++    sha256_init_s(&ctx);
++    if (a && na) sha256_update_s(&ctx, a, na);
++    if (b && nb) sha256_update_s(&ctx, b, nb);
++    uint8_t md[32];
++    sha256_final_s(&ctx, md);
++    static const char hex[] = "0123456789abcdef";
++    for (int i = 0; i < 32; i++) { out[2 * i] = hex[md[i] >> 4]; out[2 * i + 1] = hex[md[i] & 15]; }
++    out[64] = 0;
++}
++#endif
+ 
+ static const char *cache_dir(void) {
+     static const char *d;
+@@ -339,7 +447,9 @@ static void list_add(const char *key, int stage) {   // g_mu held
+ static void *prewarm_thread(void *unused) {
+     (void)unused;
+     pthread_setname_np("totk-shader-prewarm");
++#ifdef _WIN32
+     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
++#endif
+     for (;;) {
+         size_t at = atomic_fetch_add(&g_list_at, 67);   // one line: 64 hex digits, space, stage, newline (67 bytes)
+         if (at + 67 > g_list_n) break;
+diff --git a/src/gfx/vkb_tex.c b/src/gfx/vkb_tex.c
+index 4bc4518..4752ac9 100644
+--- a/src/gfx/vkb_tex.c
++++ b/src/gfx/vkb_tex.c
+@@ -7,7 +7,13 @@
+ #include <math.h>
+ #include <stdlib.h>
+ #include <string.h>
++#ifdef _WIN32
+ #include <direct.h>
++#else
++#include <sys/stat.h>
++#include <unistd.h>
++#define _mkdir(path) mkdir(path, 0777)
++#endif
+ 
+ #include "compat/gfx_compat.h"
+ #include "host/hle.h"
+diff --git a/src/host/audio_renderer.c b/src/host/audio_renderer.c
+index 849a156..07f4996 100644
+--- a/src/host/audio_renderer.c
++++ b/src/host/audio_renderer.c
+@@ -14,7 +14,9 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <time.h>
+-#include <windows.h>  // [port] mach / QoS
++#ifdef _WIN32
++#include <windows.h>
++#endif  // [port] mach / QoS
+ #undef near  // [port] windef.h macro
+ 
+ #define REV(n) (0x30564552u + ((uint32_t)(n) << 24))   /* "REVn" */
+@@ -251,9 +253,11 @@ static void advance_voice(AudioRenderer *r, ServerVoice *v, double out_seconds)
+ }
+ static void *render_thread(void *p) {
+     AudioRenderer *r = p;
++#ifdef _WIN32
+     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);  // [port] QoS user-interactive
+     // [port] nanosleep sleeps in whole scheduler ticks on Windows; a high-resolution waitable timer keeps the 5 ms period.
+     HANDLE timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
++#endif
+     const double frame = (double)r->param.sample_count / r->param.sample_rate;
+     struct timespec next; clock_gettime(CLOCK_MONOTONIC, &next);
+     while (__atomic_load_n(&r->running, __ATOMIC_ACQUIRE)) {
+@@ -275,13 +279,22 @@ static void *render_thread(void *p) {
+         next.tv_nsec += (long)ns; while (next.tv_nsec >= 1000000000L) { next.tv_nsec -= 1000000000L; next.tv_sec++; }
+         struct timespec now; clock_gettime(CLOCK_MONOTONIC, &now);
+         int64_t wait = (int64_t)(next.tv_sec - now.tv_sec) * 1000000000LL + (next.tv_nsec - now.tv_nsec);
+-        if (wait > 0) {   // [port]
++#ifdef _WIN32
++        if (wait > 0) {
+             if (timer) { LARGE_INTEGER due = {.QuadPart = -(wait / 100)}; SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE); WaitForSingleObject(timer, INFINITE); }
+             else { struct timespec d = {wait / 1000000000LL, wait % 1000000000LL}; nanosleep(&d, NULL); }
+         }
++#else
++        if (wait > 0) {
++            struct timespec d = {wait / 1000000000LL, wait % 1000000000LL};
++            nanosleep(&d, NULL);
++        }
++#endif
+         else if (wait < -100000000LL) next = now;   /* fell far behind (debugger, sleep): resynchronise */
+     }
++#ifdef _WIN32
+     if (timer) CloseHandle(timer);  // [port]
++#endif
+     return NULL;
+ }
+ 
+diff --git a/src/host/boot.c b/src/host/boot.c
+index 5ad94df..832cd78 100644
+--- a/src/host/boot.c
++++ b/src/host/boot.c
+@@ -8,8 +8,10 @@
+ #include "host.h"
+ #include "version.h"   // build/version.h (tools/build_game.py, tools/version.py)
+ #ifdef _WIN32
++#ifdef _WIN32
+ #include <windows.h>
+ #endif
++#endif
+ 
+ static void loader_ready(Cpu *c) { (void)c; fprintf(stderr, "[totk] rtld callback: modules linked\n"); }
+ 
+diff --git a/src/host/fs.c b/src/host/fs.c
+index 4f4b1b2..e0057ce 100644
+--- a/src/host/fs.c
++++ b/src/host/fs.c
+@@ -18,8 +18,10 @@
+ #include <sys/stat.h>
+ #include <unistd.h>
+ #ifdef _WIN32
++#ifdef _WIN32
+ #include <windows.h>
+ #endif
++#endif
+ 
+ #include "host.h"
+ #include "../runtime/hle.h"
+diff --git a/src/host/overrides_oe.c b/src/host/overrides_oe.c
+index b3355b5..515f440 100644
+--- a/src/host/overrides_oe.c
++++ b/src/host/overrides_oe.c
+@@ -5,8 +5,14 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #ifdef _WIN32
++#ifdef _WIN32
+ #include <windows.h>
+ #endif
++#else
++#ifndef LOCALE_NAME_MAX_LENGTH
++#define LOCALE_NAME_MAX_LENGTH 85
++#endif
++#endif
+ 
+ #include "host.h"
+ #include "../runtime/hle.h"
+diff --git a/src/host/overrides_time.c b/src/host/overrides_time.c
+index 5722e98..a057c7e 100644
+--- a/src/host/overrides_time.c
++++ b/src/host/overrides_time.c
+@@ -4,13 +4,18 @@
+  * counts seconds of host monotonic time with one source id per process. ClockSnapshot uses the public 0xD0-byte
+  * layout because game code may read its fields through inline accessors.
+  * TODO(port): the snapshot's location name is "UTC"; map the Windows time zone to its IANA name. */
++#ifndef _GNU_SOURCE
++#define _GNU_SOURCE
++#endif
+ #include <pthread.h>
+ #include <stdlib.h>
+ #include <string.h>
+ #include <time.h>
+ #ifdef _WIN32
++#ifdef _WIN32
+ #include <windows.h>
+ #endif
++#endif
+ 
+ #include "host.h"
+ #include "../runtime/hle.h"
+@@ -50,22 +55,28 @@ static int64_t posix_now(void) {
+     return (int64_t)time(NULL) + off;
+ }
+ 
+-static int32_t local_utc_offset(int *dst) {
++static int32_t local_utc_offset(time_t t, int *dst) {
+ #ifdef _WIN32
+     TIME_ZONE_INFORMATION tz;
+     DWORD r = GetTimeZoneInformation(&tz);
+     *dst = r == TIME_ZONE_ID_DAYLIGHT;
+     return -(int32_t)(tz.Bias + (r == TIME_ZONE_ID_DAYLIGHT ? tz.DaylightBias : r == TIME_ZONE_ID_STANDARD ? tz.StandardBias : 0)) * 60;
+ #else
+-    *dst = 0;
+-    return 0;
++    struct tm local;
++    if (!localtime_r(&t, &local)) runtime_fail("local time zone conversion");
++    *dst = local.tm_isdst > 0;
++    return (int32_t)local.tm_gmtoff;
+ #endif
+ }
+ 
+ static void fill_calendar(CalendarTime *c, CalendarAdditionalInfo *info, int64_t posix, int local) {
+     time_t t = (time_t)posix;
+     struct tm tm;
++#ifdef _WIN32
+     if ((local ? localtime_s(&tm, &t) : gmtime_s(&tm, &t)) != 0) runtime_fail("calendar conversion");
++#else
++    if (!(local ? localtime_r(&t, &tm) : gmtime_r(&t, &tm))) runtime_fail("calendar conversion");
++#endif
+     *c = (CalendarTime){(int16_t)(tm.tm_year + 1900), (int8_t)(tm.tm_mon + 1), (int8_t)tm.tm_mday, (int8_t)tm.tm_hour,
+                         (int8_t)tm.tm_min, (int8_t)tm.tm_sec, 0};
+     if (info) {
+@@ -73,7 +84,7 @@ static void fill_calendar(CalendarTime *c, CalendarAdditionalInfo *info, int64_t
+         info->day_of_week = tm.tm_wday;
+         info->day_of_year = tm.tm_yday;
+         int dst = 0;
+-        int32_t offset = local ? local_utc_offset(&dst) : 0;
++        int32_t offset = local ? local_utc_offset(t, &dst) : 0;
+         snprintf(info->name, sizeof info->name, "%s", local ? "LOCAL" : "UTC");
+         info->dst = (uint8_t)(local && dst);
+         info->utc_offset = offset;
+@@ -116,7 +127,11 @@ HLE_FUNC("_ZN2nn4time18ToPosixTimeFromUtcERKNS0_12CalendarTimeE", time_to_posix_
+     struct tm tm = {0};
+     tm.tm_year = cal->year - 1900; tm.tm_mon = cal->month - 1; tm.tm_mday = cal->day;
+     tm.tm_hour = cal->hour; tm.tm_min = cal->minute; tm.tm_sec = cal->second;
++#ifdef _WIN32
+     c->x[0] = (uint64_t)(int64_t)_mkgmtime(&tm);
++#else
++    c->x[0] = (uint64_t)(int64_t)timegm(&tm);
++#endif
+ }
+ HLE_FUNC("_ZN2nn4time13ClockSnapshotC1Ev", time_snapshot_init) { memset(snap(c->x[0]), 0, sizeof(ClockSnapshot)); }
+ HLE_FUNC("_ZN2nn4time13ClockSnapshot29CreateWithStandardSystemClockEPS1_", time_snapshot_create) {
+diff --git a/src/host/profiler.c b/src/host/profiler.c
+index e7ac048..bdd7b39 100644
+--- a/src/host/profiler.c
++++ b/src/host/profiler.c
+@@ -1,3 +1,4 @@
++#ifdef _WIN32
+ // Sampling CPU profiler for development (TOTK_PROF=<start s>:<seconds>[:<report path>]). A host thread wakes about
+ // 1000 times a second, suspends every other thread of the process in turn, reads its instruction pointer and resumes
+ // it. At the end the samples are mapped to functions through the PDB (dbghelp) and a report is written:
+@@ -312,3 +313,8 @@ void runtime_profiler_start(void) {
+     if (h) SetThreadPriority(h, THREAD_PRIORITY_HIGHEST);
+     fprintf(stderr, "[prof] armed: %.0f s from now, for %.0f s, report %s\n", start_s, duration_s, out_path);
+ }
++#else
++#include "host.h"
++
++void runtime_profiler_start(void) {}
++#endif
+diff --git a/src/host/svc.c b/src/host/svc.c
+index b51ef3b..904c2f0 100644
+--- a/src/host/svc.c
++++ b/src/host/svc.c
+@@ -10,8 +10,10 @@
+ #include <string.h>
+ #include <time.h>
+ #ifdef _WIN32
++#ifdef _WIN32
+ #include <windows.h>
+ #endif
++#endif
+ 
+ #include "host.h"
+ #include "ipc.h"
+diff --git a/src/host/watch.c b/src/host/watch.c
+index 4cfa5e1..af2cc78 100644
+--- a/src/host/watch.c
++++ b/src/host/watch.c
+@@ -1,3 +1,4 @@
++#ifdef _WIN32
+ // Memory write watch for development: which code writes a range of game memory.
+ //   TOTK_WATCH=<address>:<bytes>[@<present>]
+ // From that present on (default 1) the range's pages are guard pages. Every write into the range is recorded with the
+@@ -203,3 +204,10 @@ void runtime_watch_tick(uint64_t present) {
+         report();
+     }
+ }
++#else
++#include "host.h"
++
++void runtime_watch_tick(uint64_t present) {
++    (void)present;
++}
++#endif
+diff --git a/src/runtime/dispatch.c b/src/runtime/dispatch.c
+index f02ac81..50de728 100644
+--- a/src/runtime/dispatch.c
++++ b/src/runtime/dispatch.c
+@@ -29,7 +29,8 @@ static int override_count;
+ 
+ // Host implementations registered by name (HLE_FUNC, hle.h)
+ #if defined(__linux__)
+-extern const HleImplEntry __start_hle_impls[], __stop_hle_impls[];
++extern const HleImplEntry __start_hle_impls[] __attribute__((weak));
++extern const HleImplEntry __stop_hle_impls[] __attribute__((weak));
+ #else
+ // PE/COFF: the linker sorts .hle$a < .hle$m (entries) < .hle$z by the text after '$'.
+ __attribute__((section(".hle$a"), used)) static const HleImplEntry __start_hle_impls[1];
+@@ -38,6 +39,9 @@ __attribute__((section(".hle$z"), used)) static const HleImplEntry __stop_hle_im
+ 
+ static const HleImplEntry *hle_lookup_entry(const char *name) {
+     const HleImplEntry *start = __start_hle_impls, *stop = __stop_hle_impls;
++#if defined(__linux__)
++    if (!start || !stop) return NULL;
++#endif
+     __asm__("" : "+r"(start), "+r"(stop));  // separate objects: keep the compiler from reasoning about them
+     for (const HleImplEntry *p = start; p < stop; p++)
+         if (p->name && !strcmp(p->name, name)) return p;
+diff --git a/src/runtime/platform/linux.c b/src/runtime/platform/linux.c
+index d263687..f9bcedd 100644
+--- a/src/runtime/platform/linux.c
++++ b/src/runtime/platform/linux.c
+@@ -28,6 +28,10 @@
+ // Everything readable/writable from the start, like macOS: the guest maps at 4K granularity, and untouched pages
+ // cost nothing (MAP_NORESERVE: the 12 GB window doesn't count against overcommit).
+ bool plat_reserve_guest(uint64_t lo, uint64_t hi) {
++    if (lo >= 0x10000) {
++        mmap((void *)(uintptr_t)(lo - 0x10000), 0x10000, PROT_READ | PROT_WRITE,
++             MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
++    }
+     void *p = mmap((void *)(uintptr_t)lo, hi - lo, PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
+     if (p == MAP_FAILED) return false;
+diff --git a/src/runtime/platform/linux_compat.h b/src/runtime/platform/linux_compat.h
+index 806f1bf..2599cc0 100644
+--- a/src/runtime/platform/linux_compat.h
++++ b/src/runtime/platform/linux_compat.h
+@@ -1,37 +1,56 @@
+-// What glibc before 2.38 lacks (included via runtime/platform.h on Linux only): the AppImage is built against
+-// Ubuntu 22.04's glibc 2.35 (no strlcpy / strlcat until 2.38, no arc4random until 2.36).
+-#pragma once
+-#include <stdint.h>
+-#include <string.h>
+-#include <sys/random.h>
+-
+-#if !__GLIBC_PREREQ(2, 38)
+-static inline size_t strlcpy(char *d, const char *s, size_t n) {
+-    size_t len = strlen(s);
+-    if (n) {
+-        size_t k = len < n - 1 ? len : n - 1;
+-        memcpy(d, s, k);
+-        d[k] = 0;
+-    }
+-    return len;
+-}
+-static inline size_t strlcat(char *d, const char *s, size_t n) {
+-    size_t dl = strnlen(d, n);
+-    if (dl == n) return n + strlen(s);
+-    return dl + strlcpy(d + dl, s, n - dl);
+-}
+-#endif
+-
+-#if !__GLIBC_PREREQ(2, 36)
+-static inline uint32_t arc4random(void) {
+-    uint32_t v = 0;
+-    while (getrandom(&v, sizeof v, 0) != sizeof v) {}
+-    return v;
+-}
+-static inline uint32_t arc4random_uniform(uint32_t n) {
+-    if (n < 2) return 0;
+-    uint32_t min = -n % n, r;  // reject the low values that would bias the modulo
+-    do r = arc4random(); while (r < min);
+-    return r % n;
+-}
+-#endif
++
++#ifndef O_BINARY
++#define O_BINARY 0
++#endif
++
++#include <unistd.h>
++static inline int _chsize_s(int fd, int64_t size) {
++    return ftruncate(fd, (off_t)size);
++}
++// What glibc before 2.38 lacks (included via runtime/platform.h on Linux only): the AppImage is built against
++// Ubuntu 22.04's glibc 2.35 (no strlcpy / strlcat until 2.38, no arc4random until 2.36).
++#pragma once
++#include <stdlib.h>
++#include <stdint.h>
++#include <string.h>
++#include <sys/random.h>
++
++static inline void *_aligned_malloc(size_t size, size_t alignment) {
++    void *ptr = NULL;
++    if (posix_memalign(&ptr, alignment, size) != 0) return NULL;
++    return ptr;
++}
++static inline void _aligned_free(void *ptr) {
++    free(ptr);
++}
++
++#if !__GLIBC_PREREQ(2, 38)
++static inline size_t strlcpy(char *d, const char *s, size_t n) {
++    size_t len = strlen(s);
++    if (n) {
++        size_t k = len < n - 1 ? len : n - 1;
++        memcpy(d, s, k);
++        d[k] = 0;
++    }
++    return len;
++}
++static inline size_t strlcat(char *d, const char *s, size_t n) {
++    size_t dl = strnlen(d, n);
++    if (dl == n) return n + strlen(s);
++    return dl + strlcpy(d + dl, s, n - dl);
++}
++#endif
++
++#if !__GLIBC_PREREQ(2, 36)
++static inline uint32_t arc4random(void) {
++    uint32_t v = 0;
++    while (getrandom(&v, sizeof v, 0) != sizeof v) {}
++    return v;
++}
++static inline uint32_t arc4random_uniform(uint32_t n) {
++    if (n < 2) return 0;
++    uint32_t min = -n % n, r;  // reject the low values that would bias the modulo
++    do r = arc4random(); while (r < min);
++    return r % n;
++}
++#endif
+diff --git a/src/vk/vk.c b/src/vk/vk.c
+index d081ee4..b9e5b5d 100644
+--- a/src/vk/vk.c
++++ b/src/vk/vk.c
+@@ -1,10 +1,15 @@
++#ifndef _WIN32
++#include <dlfcn.h>
++#endif
+ // The shared Vulkan instance and device (see vk.h).
+ #include "vk.h"
+ 
+ #include <SDL3/SDL.h>
+ #include <SDL3/SDL_vulkan.h>
+ #include <pthread.h>
++#ifdef _WIN32
+ #include <windows.h>
++#endif
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -38,10 +43,16 @@ static int create_instance(SDL_Window *window) {
+     PFN_vkGetInstanceProcAddr gipa = NULL;
+     if (window) gipa = (PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr();
+     else {   // no window (TOTK_HEADLESS): SDL's video subsystem is not up, so the loader is loaded here
++#ifdef _WIN32
+         HMODULE m = LoadLibraryA("vulkan-1.dll");
+         if (m) gipa = (PFN_vkGetInstanceProcAddr)(void *)GetProcAddress(m, "vkGetInstanceProcAddr");
++#else
++        void *m = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
++        if (!m) m = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
++        if (m) gipa = (PFN_vkGetInstanceProcAddr)dlsym(m, "vkGetInstanceProcAddr");
++#endif
+     }
+-    if (!gipa) { LOG("no Vulkan loader (vulkan-1.dll)"); return 0; }
++    if (!gipa) { LOG("no Vulkan loader"); return 0; }
+ #define LOAD(f) vk.f = (PFN_##f)gipa(NULL, #f);
+     VK_FN_GLOBAL(LOAD)
+ #undef LOAD
+diff --git a/tools/build_game.py b/tools/build_game.py
+index e121c5e..3d2ad1c 100644
+--- a/tools/build_game.py
++++ b/tools/build_game.py
+@@ -1,7 +1,7 @@
+-"""Write build/build.ninja for the runtime + the generated game code, and run ninja (MSYS2 CLANG64 clang/ninja).
++"""Write build/build.ninja for the runtime + the generated game code, and run ninja.
+ 
+ usage: python tools/build_game.py [--generated data/generated] [--target probe_cpu] [-j N] [--cpus N]
+-The ultratears target links UltraTears.exe in the game folder itself (its debug symbols: build/UltraTears.pdb).
++The ultratears target links the game executable in the game folder itself.
+ Run in the game folder (tools/setup.py does): the generated C is in data/ (derived from the game), objects and
+ executables go to build/; neither is ever in git.
+ """
+@@ -16,7 +16,9 @@ sys.path.insert(0, str(ROOT / 'tools'))
+ from toolchain import CLANG64, env as tool_env  # noqa: E402
+ import version  # noqa: E402
+ 
+-RUNTIME = ['src/runtime/dispatch.c', 'src/runtime/loader.c', 'src/runtime/platform/windows.c']
++LINUX = sys.platform == 'linux'
++RUNTIME = ['src/runtime/dispatch.c', 'src/runtime/loader.c',
++           'src/runtime/platform/linux.c' if LINUX else 'src/runtime/platform/windows.c']
+ TARGETS = {'probe_cpu': ['src/probe/probe_cpu.c'],
+            'ultratears': ['src/host/boot.c', 'src/host/guest.c', 'src/host/svc.c', 'src/host/threads.c', 'src/host/ipc.c',
+                     'src/host/services_lm.c', 'src/host/overrides_oe.c',
+@@ -36,9 +38,12 @@ GFX = ['src/gfx/nvn/hle_nvn.c', 'src/gfx/nvn/nvn_tex.c', 'src/gfx/nvn/totk_nvn_e
+        'src/gfx/vkb_draw.c', 'src/gfx/tex/nvn_deswizzle.c', 'src/gfx/tex/astc.c', 'src/gfx/vkb_bc7.c',
+        'src/gfx/tex/bc7.cpp', 'src/gfx/tex/bc7enc/bc7enc.cpp', 'src/gfx/tex/bc7enc/rgbcx.cpp', 'src/gfx/tex/bc7key.c']
+ GFX_INCLUDES = '-Isrc/gfx -Isrc/gfx/nvn -Isrc/gfx/nvn/include -Isrc/gfx/compat'
+-LIBS = '-static -Wl,--error-limit=0 -Wl,--disable-high-entropy-va -pthread -ldbghelp -lwinmm -lsynchronization -lshell32 -lopus -lvpx -lSDL3 -liconv' \
+-       ' -luser32 -lgdi32 -limm32 -lole32 -loleaut32 -lversion -luuid -ladvapi32 -lsetupapi -ldinput8 -lbcrypt -lc++'
+-CFLAGS = '-O2 -march=x86-64-v3 -g -gcodeview -fno-strict-aliasing -D_FILE_OFFSET_BITS=64'
++LIBS = ('-Lbuild/lib -L../../build/third_party/sdl3 -lSDL3 -lopus -lvpx -lzstd -lpthread -ldl -lm -lstdc++' if LINUX else
++        '-static -Wl,--error-limit=0 -Wl,--disable-high-entropy-va -pthread -ldbghelp -lwinmm -lsynchronization -lshell32 -lopus -lvpx -lSDL3 -liconv'
++        ' -luser32 -lgdi32 -limm32 -lole32 -loleaut32 -lversion -luuid -ladvapi32 -lsetupapi -ldinput8 -lbcrypt -lc++')
++CFLAGS = ('-O2 -march=x86-64-v3 -g -fno-strict-aliasing -D_FILE_OFFSET_BITS=64' if LINUX else
++          '-O2 -march=x86-64-v3 -g -gcodeview -fno-strict-aliasing -D_FILE_OFFSET_BITS=64')
++CFLAGS += ' -I../../third_party/sdl3/include -I../../third_party/vulkan-headers/include'
+ GAME_CFLAGS = CFLAGS + ' -w -Isrc/runtime'
+ 
+ 
+@@ -52,11 +57,12 @@ def write_if_changed(path, text):   # an unchanged file keeps its time: nothing
+ 
+ 
+ def version_files(build):
+-    """build/version.h (the version and commit, tools/version.py) and the exe's resources: icon and version info."""
++    """Write build/version.h and, on Windows, the executable's icon and version resources."""
+     v, commit = version.current()
+     n = ','.join(str(x) for x in version.numbers(v))
+     write_if_changed(build / 'version.h', f'#define ULTRS_VERSION "{v}"\n#define ULTRS_COMMIT "{commit}"\n')
+-    write_if_changed(build / 'ultratears.rc', f'''1 ICON "assets/icon.ico"
++    if not LINUX:
++        write_if_changed(build / 'ultratears.rc', f'''1 ICON "assets/icon.ico"
+ 1 VERSIONINFO
+ FILEVERSION {n}
+ PRODUCTVERSION {n}
+@@ -115,10 +121,10 @@ def main():
+         '  command = clang -MD -MF $out.d $gameflags -c $in -o $out',   # runtime headers (cpu.h, simd*.h) are inlined
+         '  depfile = $out.d',
+         '  deps = gcc',
+-        'rule rc',
+-        '  command = llvm-windres --target=pe-x86-64 -I . $in -o $out',
++        *([] if LINUX else ['rule rc', '  command = llvm-windres --target=pe-x86-64 -I . $in -o $out']),
+         'rule link',
+-        f'  command = clang -fuse-ld=lld -g -Wl,--pdb=$pdb -o $out @$out.rsp {LIBS}',
++        (f'  command = clang -g -o $out @$out.rsp {LIBS}' if LINUX else
++         f'  command = clang -g -Wl,--pdb=$pdb -o $out @$out.rsp {LIBS}'),
+         '  rspfile = $out.rsp',
+         '  rspfile_content = $in',
+         '',
+@@ -129,10 +135,11 @@ def main():
+         lines.append(f'build {obj}: cc {src}')
+         objs.append(obj)
+     if a.target == 'ultratears':
+-        # the port's icon (assets/icon.ico, the author's own drawing: README.md, Legal) and version in the resources
++        # Windows resources: the port's icon (assets/icon.ico) and version information.
+         print(f'UltraTears {version_files(build)}', flush=True)
+-        lines.append('build build/obj/ultratears_res.o: rc build/ultratears.rc | assets/icon.ico')
+-        objs.append('build/obj/ultratears_res.o')
++        if not LINUX:
++            lines.append('build build/obj/ultratears_res.o: rc build/ultratears.rc | assets/icon.ico')
++            objs.append('build/obj/ultratears_res.o')
+         for src in GFX:
+             cxx = src.endswith('.cpp')
+             obj = f'build/obj/{src.rsplit(".", 1)[0].replace("/", "_")}.o'
+@@ -152,20 +159,24 @@ def main():
+             game_objs.append(obj)
+     if not game_objs:
+         sys.exit(f'no generated C in {gen}: run tools/gen_game.py first')
+-    exe = 'UltraTears.exe' if a.target == 'ultratears' else f'build/{a.target}.exe'   # the game: in the game folder
++    exe = (('ultratears' if LINUX else 'UltraTears.exe') if a.target == 'ultratears' else
++           f'build/{a.target}' + ('' if LINUX else '.exe'))   # the game: in the game folder
+     lines.append(f'build {exe}: link {" ".join(objs + game_objs)}')
+-    lines.append(f'  pdb = build/{pathlib.Path(exe).stem}.pdb')
++    if not LINUX:
++        lines.append(f'  pdb = build/{pathlib.Path(exe).stem}.pdb')
+     lines.append(f'default {exe}')
+     (build / 'build.ninja').write_text('\n'.join(lines) + '\n')
+     env = tool_env()
+     print(f'{len(game_objs)} generated files, {len(objs)} runtime files', flush=True)
+-    # The user works on this PC during builds: ninja starts suspended, gets the first --cpus logical CPUs and
+-    # below-normal priority, then runs; every clang it starts inherits both, so the other CPUs stay free.
+-    ninja = [str(CLANG64 / 'ninja.exe'), '-C', str(ROOT), '-f', 'build/build.ninja', f'-j{a.j}', '-k', '0']
++    # Windows keeps the user's CPUs free with process affinity and lower priority; Linux uses ninja's -j limit.
++    ninja = (['ninja'] if LINUX else [str(CLANG64 / 'ninja.exe')]) + [
++        '-C', str(ROOT), '-f', 'build/build.ninja', f'-j{a.j}', '-k', '0']
+     sys.exit(run_limited(ninja, env, (1 << a.cpus) - 1))
+ 
+ 
+ def run_limited(cmd, env, mask):
++    if LINUX:
++        return subprocess.run(cmd, env=env).returncode
+     import ctypes
+     CREATE_SUSPENDED, BELOW_NORMAL_PRIORITY_CLASS = 0x4, 0x4000
+     p = subprocess.Popen(cmd, env=env, creationflags=CREATE_SUSPENDED | BELOW_NORMAL_PRIORITY_CLASS)
+diff --git a/tools/toolchain.py b/tools/toolchain.py
+index 1c71e9f..470c3af 100644
+--- a/tools/toolchain.py
++++ b/tools/toolchain.py
+@@ -2,14 +2,25 @@
+ 
+ CLANG64: a folder with clang, clang++, lld, ninja and the static libraries the port links (SDL3, opus, vpx, zstd,
+ iconv, libc++): deps/clang64/bin in the builder package (a trimmed MSYS2 CLANG64), else ULTRS_CLANG64, else
+-C:/msys64/clang64/bin. XLATE: the shader translator ultrs-shaders.exe (tools/build_xlate.py).
++C:/msys64/clang64/bin. Linux uses the system clang, clang++, lld and ninja. XLATE: the shader translator
++ultrs-shaders.exe (tools/build_xlate.py).
+ """
+ import os
+ import pathlib
++import shutil
++import sys
+ 
+ ROOT = pathlib.Path(__file__).resolve().parent.parent
+ 
+ 
++def _linux_tool(name):
++    found = shutil.which(name)
++    if found:
++        return pathlib.Path(found)
++    fallback = pathlib.Path('/usr/bin') / name
++    return fallback if fallback.is_file() and os.access(fallback, os.X_OK) else None
++
++
+ def _clang64():
+     for c in (ROOT / 'deps/clang64/bin', os.environ.get('ULTRS_CLANG64'), 'C:/msys64/clang64/bin'):
+         if c and (pathlib.Path(c) / 'clang.exe').is_file():
+@@ -17,13 +28,21 @@ def _clang64():
+     return None
+ 
+ 
+-CLANG64 = _clang64()
++LINUX_TOOLS = {name: _linux_tool(name) for name in ('clang', 'clang++', 'ninja')} if sys.platform == 'linux' else {}
++CLANG64 = None if sys.platform == 'linux' else _clang64()
+ XLATE = next((p for p in (ROOT / 'deps/shaders/ultrs-shaders.exe', ROOT / 'dev-local/build/shaders/ultrs-shaders.exe') if p.is_file()),
+              None)
+ 
+ 
+ def env():
+-    """The environment for the build's commands: CLANG64 first on PATH."""
++    """The environment for the build's commands: the platform's tool directory first on PATH."""
++    if sys.platform == 'linux':
++        missing = [name for name, path in LINUX_TOOLS.items() if path is None]
++        if missing:
++            raise SystemExit('Linux build tools not found: ' + ', '.join(missing) +
++                             ' (install clang, lld and ninja or add them to PATH)')
++        tool_dirs = dict.fromkeys(str(path.parent) for path in LINUX_TOOLS.values())
++        return dict(os.environ, PATH=os.pathsep.join((*tool_dirs, os.environ.get('PATH', ''))))
+     if CLANG64 is None:
+         raise SystemExit('clang not found: unpack the builder package (deps/clang64) or install MSYS2 CLANG64 '
+                          '(see BUILDING.md), or set ULTRS_CLANG64 to its bin folder')

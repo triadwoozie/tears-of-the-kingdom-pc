@@ -21,6 +21,7 @@ pub fn run() {
             controller::test_rumble,
             assets::validate_romfs,
             assets::pack_romfs,
+            assets::pack_shaders,
             runner::launch_engine,
             runner::stop_engine,
             runner::get_engine_status,

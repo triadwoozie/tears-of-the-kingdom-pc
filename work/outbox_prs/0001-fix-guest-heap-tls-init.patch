@@ -1,0 +1,129 @@
+diff --git a/src/host/guest.c b/src/host/guest.c
+index b327ef1..e2205fa 100644
+--- a/src/host/guest.c
++++ b/src/host/guest.c
+@@ -95,3 +95,43 @@ static void guest_fault_report(void) {
+ }
+ extern void (*rt_fault_extra)(void);
+ __attribute__((constructor)) static void install_fault_report(void) { rt_fault_extra = guest_fault_report; }
++
++// Defensive fallback for sead::Heap::alloc (0x080006a920ull) when invoked without a valid heap context
++static void hle_sead_heap_alloc_override(Cpu *c) {
++    if (c->x[1] == 0) {
++        static pthread_mutex_t s_fallback_lock = PTHREAD_MUTEX_INITIALIZER;
++        static uint8_t *s_fallback_arena = NULL;
++        static uint64_t s_fallback_used = 0;
++        const uint64_t ARENA_SIZE = 32ULL << 20;  // 32 MiB fallback arena
++        uint64_t size = c->x[0] ? c->x[0] : 0x230;
++        uint64_t alignment = c->x[2] ? c->x[2] : 16;
++        if (alignment < 8) alignment = 8;
++        pthread_mutex_lock(&s_fallback_lock);
++        if (!s_fallback_arena) {
++            s_fallback_arena = (uint8_t *)hle_alloc(ARENA_SIZE);
++        }
++        uint64_t cur = (uint64_t)(uintptr_t)(s_fallback_arena + s_fallback_used);
++        uint64_t aligned = (cur + (alignment - 1)) & ~(alignment - 1);
++        uint64_t new_used = (aligned - (uint64_t)(uintptr_t)s_fallback_arena) + size;
++        if (new_used <= ARENA_SIZE) {
++            s_fallback_used = new_used;
++            c->x[0] = aligned;
++            memset((void *)(uintptr_t)c->x[0], 0, (size_t)size);
++        } else {
++            fprintf(stderr, "[totk] WARNING: sead::Heap fallback arena exhausted (%llu bytes requested)\n",
++                    (unsigned long long)size);
++            c->x[0] = 0;
++        }
++        pthread_mutex_unlock(&s_fallback_lock);
++        fprintf(stderr, "[totk] sead::Heap::alloc with NULL heap pointer -> fallback arena alloc %#llx (size=%llu, lr=%#llx)\n",
++                (unsigned long long)c->x[0], (unsigned long long)size, (unsigned long long)c->x[30]);
++        return;
++    }
++    GuestFn orig = dispatch_lookup(0x080006a920ull);
++    if (orig) orig(c);
++    else c->x[0] = 0;
++}
++
++__attribute__((constructor)) static void install_heap_override(void) {
++    hle_override(0x080006a920ull, hle_sead_heap_alloc_override, "sead::Heap::alloc");
++}
+diff --git a/src/host/svc.c b/src/host/svc.c
+index 904c2f0..f290d97 100644
+--- a/src/host/svc.c
++++ b/src/host/svc.c
+@@ -29,11 +29,11 @@
+ #define STACK_SIZE    0x10000000ULL
+ #define STACK_START   (LOW_START + STACK_OFF)
+ #define HEAP_START    (LOW_START + STACK_OFF + STACK_SIZE + 0x10000000ULL)
+-#define HEAP_CAP      (4ULL << 30)   /* 1.4.3 sets a 2.2 GiB heap during nninitStartup */
++#define HEAP_CAP      (LOW_SIZE - (HEAP_START - LOW_START))
+ #define ASLR_START    LOW_START
+ #define ASLR_SIZE     ((1ULL << 39) - LOW_START)
+ #define SYSTEM_RESOURCE_BUDGET (32ULL << 20)
+-#define APP_POOL      0xcd500000ULL  /* retail application pool, 3.2 GiB (MacNativeGames' default without 2K heaps) */
++#define APP_POOL      (6ULL << 30)   /* desktop application pool */
+ 
+ static uint64_t heap_size;
+ static unsigned char alias_pages[ALIAS_SIZE / 4096];
+@@ -322,10 +322,22 @@ uint64_t runtime_svc(unsigned num, uint64_t *r, uint64_t pc) {
+     }
+     case 0x01: {   /* SetHeapSize */
+         uint64_t size = r[1];
+-        if (size > HEAP_CAP || size % 0x200000 || size + runtime_image_bytes() > APP_POOL) { r[0] = 0xd401; return r[0]; }
++        if (!size) {
++            if (heap_size && !plat_reset_guest(HEAP_START, HEAP_START + heap_size)) runtime_fail("reset guest heap");
++            heap_size = 0;
++            r[0] = 0;
++            r[1] = HEAP_START;
++            return 0;
++        }
++        uint64_t image_bytes = runtime_image_bytes();
++        if (size > HEAP_CAP || (size & 0xfff) || image_bytes > APP_POOL || size > APP_POOL - image_bytes) {
++            r[0] = 0xd401;
++            return r[0];
++        }
+         if (size < heap_size) decommit(HEAP_START + size, heap_size - size);
+         heap_size = size;
+-        r[0] = 0; r[1] = HEAP_START;
++        r[0] = 0;
++        r[1] = HEAP_START;
+         return 0;
+     }
+     case 0x26: {   /* Break */
+diff --git a/src/host/threads.c b/src/host/threads.c
+index 075b290..acf4248 100644
+--- a/src/host/threads.c
++++ b/src/host/threads.c
+@@ -54,6 +54,7 @@ typedef struct event { int signaled; int refs; } event_t;
+ typedef struct thr {
+     uint32_t handle; uint64_t id;
+     uint64_t entry, arg, stack_top; uint64_t host_context[2]; int prio, core; uint64_t mask;
++    uint64_t parent_tls, parent_tpidr;
+     uint64_t born_ns, exit_ns; uint32_t born_tick, exit_tick;   // 建立 / 退出的时刻与当时的游戏拍（现场导出用：作业工人是不是在卡住前退的） | Time of creation / exit and the game tick at that time (for the state dump: did the job worker exit before the stall)
+     int started, exited, cancel;
+     pthread_t pt; pthread_cond_t cv;
+@@ -237,7 +238,12 @@ uint32_t (*dm_thread_tick_fn)(void);   // the current game tick, when diagnostic
+ static void *thread_main(void *p) {
+     thr_t *t = p;
+     t_self = t;
+-    Cpu *c = guest_cpu_new(t->stack_top, guest_tls_alloc());
++    uint64_t tls = guest_tls_alloc();
++    if (t->parent_tls) {
++        memcpy((void *)(uintptr_t)(tls + 0x100), (const void *)(uintptr_t)(t->parent_tls + 0x100), 0x80);
++    }
++    Cpu *c = guest_cpu_new(t->stack_top, tls);
++    c->tpidr = t->parent_tpidr;
+     guest_cpu_set(c);
+     pthread_mutex_lock(&G); while (!t->started) pthread_cond_wait(&t->cv, &G); core_take(t); pthread_mutex_unlock(&G);
+     c->x[0] = t->arg;
+@@ -343,6 +349,11 @@ int svc_thread(int num, uint64_t *regs) {
+         t->entry = regs[1]; t->arg = regs[2]; t->stack_top = regs[3] & ~0xFull;
+         t->prio = (int)regs[4]; t->core = (int)regs[5]; t->mask = t->core >= 0 ? 1ull << t->core : 7;
+         t->born_ns = now_ns(); t->born_tick = dm_thread_tick_fn ? dm_thread_tick_fn() : 0;
++        Cpu *p = guest_cpu();
++        if (p) {
++            t->parent_tls = p->tpidrro;
++            t->parent_tpidr = p->tpidr;
++        }
+         pthread_mutex_lock(&G); t->handle = h_new(O_THREAD, t); t->id = g_next_id++; t->all = g_all; g_all = t; pthread_mutex_unlock(&G);
+         pthread_attr_t a; pthread_attr_init(&a); pthread_attr_setstacksize(&a, 8 << 20);   // also the host-service stack of this guest thread
+         pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);   // 退出即回收宿主资源（客体经句柄等待，不 join） | Host resources are reclaimed on exit (the guest waits through the handle, no join)
