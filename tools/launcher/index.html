@@ -38,8 +38,8 @@
       <div class="navbar-center hidden md:flex">
         <div class="tabs tabs-bordered" id="nav-tabs">
           <a class="tab tab-active transition-all tracking-wider uppercase text-xs font-sans font-semibold" data-tab="tab-launch">Dashboard</a>
-          <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-controllers">Controllers</a>
-          <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-assets">Assets</a>
+          <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-controllers">Input & Controls</a>
+          <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-assets">RomFS & Shaders</a>
           <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-graphics">Patches & GFX</a>
           <a class="tab transition-all tracking-wider uppercase text-xs font-sans font-semibold text-[#DCD09F]/60 hover:text-[#DCD09F]" data-tab="tab-console">Console</a>
         </div>
@@ -77,7 +77,6 @@
 
           <!-- Left Column (7 cols): Hero Banner Card -->
           <div class="card bg-base-200 border border-[#DCD09F]/20 shadow-2xl overflow-hidden col-span-12 lg:col-span-7 relative p-6 zonai-watermark flex flex-col justify-between min-h-[420px]">
-            <!-- Decorative Zonai concentric circles watermark background -->
             <div class="absolute inset-0 pointer-events-none opacity-10 bg-[radial-gradient(circle_at_30%_30%,#D08D1C_0%,transparent_60%)]"></div>
 
             <div class="space-y-4 relative z-10">
@@ -87,6 +86,9 @@
                 </span>
                 <span class="badge badge-outline border-[#63A7BC]/50 text-[#63A7BC] text-[10px] font-mono">
                   Vulkan 1.4 Native
+                </span>
+                <span class="badge bg-[#D08D1C]/20 border border-[#D08D1C]/50 text-[#E8BF40] text-[10px] font-mono">
+                  PR #20 / #24 / #25 Active
                 </span>
               </div>
 
@@ -102,13 +104,13 @@
               <div class="h-px w-full bg-gradient-to-r from-[#D08D1C]/60 via-[#E8BF40]/40 to-transparent"></div>
 
               <p class="text-base-content/75 text-sm leading-relaxed max-w-xl">
-                Native AArch64 statically recompiled binary targeting host x86_64 CPU instructions and Vulkan 1.4 SPIR-V compute pipelines. Direct 39-bit memory window mapping with zero guest emulation overhead.
+                Native AArch64 statically recompiled binary targeting host x86_64 CPU instructions and Vulkan 1.4 SPIR-V compute pipelines. Direct 39-bit memory window mapping with native mouse camera look and single-file shader pack acceleration.
               </p>
             </div>
 
             <!-- Primary Launch CTA -->
             <div class="pt-6 relative z-10">
-              <button id="btn-launch" class="btn btn-primary btn-lg w-full bg-[#D08D1C] hover:bg-[#E8BF40] text-[#111714] font-sans font-bold tracking-[0.12em] uppercase border border-[#E8BF40] shadow-[0_0_20px_rgba(208,141,28,0.25)] transition-all duration-200 hover:scale-[1.01] flex items-center justify-center gap-3">
+              <button id="btn-launch" class="btn btn-primary btn-lg w-full bg-[#D08D1C] hover:bg-[#E8BF40] text-[#111714] font-sans font-bold tracking-widest uppercase border border-[#E8BF40] shadow-[0_0_20px_rgba(208,141,28,0.25)] transition-all duration-200 hover:scale-[1.01] flex items-center justify-center gap-3">
                 <svg class="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                 <span>Launch Tears of the Kingdom</span>
               </button>
@@ -158,13 +160,18 @@
                   </div>
 
                   <div class="flex items-center justify-between py-1">
+                    <span class="text-xs font-medium text-base-content/80">Native Mouse Camera (PR #20)</span>
+                    <input type="checkbox" id="dash-mouse-cam-toggle" class="toggle toggle-primary toggle-sm" checked />
+                  </div>
+
+                  <div class="flex items-center justify-between py-1">
                     <span class="text-xs font-medium text-base-content/80">On-Screen Telemetry HUD</span>
-                    <input type="checkbox" id="dash-hud-toggle" class="toggle toggle-primary toggle-sm" checked />
+                    <input type="checkbox" id="dash-hud-toggle" class="toggle toggle-secondary toggle-sm" checked />
                   </div>
 
                   <div class="flex items-center justify-between py-1">
                     <span class="text-xs font-medium text-base-content/80">Headless Execution (CI/Tests)</span>
-                    <input type="checkbox" id="dash-headless-toggle" class="toggle toggle-primary toggle-sm" />
+                    <input type="checkbox" id="dash-headless-toggle" class="toggle toggle-accent toggle-sm" />
                   </div>
                 </div>
               </div>
@@ -172,16 +179,17 @@
 
             <div class="pt-3 border-t border-base-300 text-[11px] text-base-content/50 font-mono flex justify-between items-center">
               <span>Host: x86_64 Linux</span>
-              <span class="text-[#63A7BC]">RADV / Vulkan 1.4</span>
+              <span class="text-[#63A7BC]">Vulkan 1.4 + PR #20 Mouse</span>
             </div>
           </div>
 
         </div>
       </section>
 
-      <!-- TAB 2: CONTROLLER TUNING & RUMBLE STUDIO -->
+      <!-- TAB 2: INPUT & CONTROLS (GAMEPAD + MOUSE/KB PR #20) -->
       <section id="tab-controllers" class="tab-content-panel space-y-6 hidden">
-        <!-- Top Bar: Device Selector -->
+
+        <!-- Top Input Source Row: Device Selector + Preset Switch -->
         <div class="card bg-base-200 border border-base-300 shadow-md p-5">
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div class="flex-1 space-y-1">
@@ -198,7 +206,7 @@
             </div>
 
             <div class="w-full md:w-64 space-y-1">
-              <label class="text-xs font-sans font-bold uppercase tracking-wider text-[#DCD09F]">Button Layout Preset</label>
+              <label class="text-xs font-sans font-bold uppercase tracking-wider text-[#DCD09F]">Controller Layout Preset</label>
               <select id="ctrl-profile-select" class="select select-bordered w-full font-mono text-xs bg-base-100">
                 <option value="Nintendo (B/A, Y/X)" selected>Nintendo (B/A, Y/X)</option>
                 <option value="Xbox / PC Standard">Xbox / PC Standard (A/B, X/Y Swap)</option>
@@ -207,7 +215,92 @@
           </div>
         </div>
 
-        <!-- 2-Column Calibration Deck -->
+        <!-- PR #20 DEDICATED MOUSE & KEYBOARD PANEL -->
+        <div class="card bg-base-200 border border-[#D08D1C]/40 shadow-xl p-5 space-y-5">
+          <div class="flex flex-col md:flex-row md:items-center justify-between border-b border-base-300 pb-3 gap-2">
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 class="font-sans font-bold text-sm tracking-wider uppercase text-[#DCD09F] flex items-center gap-2">
+                  <svg class="w-4 h-4 text-[#D08D1C] fill-current" viewBox="0 0 24 24"><path d="M13 1.07V9h7c0-4.08-3.05-7.44-7-7.93zM4 15c0 4.42 3.58 8 8 8s8-3.58 8-8v-4H4v4zm7-13.93C7.05 1.56 4 4.92 4 9h7V1.07z"/></svg>
+                  Native PC Mouse Camera & Keyboard Controls (PR #20)
+                </h3>
+                <span class="badge badge-sm bg-[#12582C] text-[#DCD09F] border border-[#E8BF40]/40 font-mono text-[10px]">SDL3 Native Input</span>
+              </div>
+              <p class="text-[11px] text-base-content/60 mt-0.5">Smooth sub-pixel cursor delta panning, configurable aim/scope ratios, and physical key scancodes.</p>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <span class="text-xs font-medium text-base-content/80">Master Mouse Camera:</span>
+              <input type="checkbox" id="mouse-cam-master-toggle" class="toggle toggle-primary toggle-sm" checked />
+            </div>
+          </div>
+
+          <!-- Mouse Sensitivity Sliders & Axis Toggles -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pt-1">
+            <div class="space-y-1">
+              <div class="flex justify-between text-xs">
+                <span class="text-base-content/80 font-medium">Mouse Look Sensitivity (X / Yaw)</span>
+                <span id="label-mouse-sens-x" class="font-mono text-[#D08D1C] font-bold">1.00x</span>
+              </div>
+              <input type="range" id="slider-mouse-sens-x" min="1" max="50" value="10" class="range range-primary range-xs" />
+              <div class="flex justify-between text-[10px] text-base-content/40 font-mono">
+                <span>0.1x</span><span>1.0x (Default)</span><span>5.0x</span>
+              </div>
+            </div>
+
+            <div class="space-y-1">
+              <div class="flex justify-between text-xs">
+                <span class="text-base-content/80 font-medium">Mouse Look Sensitivity (Y / Pitch)</span>
+                <span id="label-mouse-sens-y" class="font-mono text-[#D08D1C] font-bold">1.00x</span>
+              </div>
+              <input type="range" id="slider-mouse-sens-y" min="1" max="50" value="10" class="range range-primary range-xs" />
+              <div class="flex justify-between text-[10px] text-base-content/40 font-mono">
+                <span>0.1x</span><span>1.0x</span><span>5.0x</span>
+              </div>
+            </div>
+
+            <div class="flex flex-col justify-center space-y-2 bg-base-100 p-3 rounded-sm border border-base-300">
+              <label class="flex items-center justify-between cursor-pointer text-xs">
+                <span class="text-base-content/80 font-medium">Invert Mouse Pitch (Y-Axis)</span>
+                <input type="checkbox" id="mouse-invert-y" class="checkbox checkbox-accent checkbox-xs" />
+              </label>
+              <label class="flex items-center justify-between cursor-pointer text-xs">
+                <span class="text-base-content/80 font-medium">Invert Mouse Yaw (X-Axis)</span>
+                <input type="checkbox" id="mouse-invert-x" class="checkbox checkbox-accent checkbox-xs" />
+              </label>
+              <label class="flex items-center justify-between cursor-pointer text-xs">
+                <span class="text-base-content/80 font-medium">Lock Cursor on Focus (F8 Release)</span>
+                <input type="checkbox" id="mouse-lock-cursor" class="checkbox checkbox-primary checkbox-xs" checked />
+              </label>
+            </div>
+          </div>
+
+          <!-- Keyboard Bindings Matrix -->
+          <div class="space-y-2 pt-2 border-t border-base-300">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-sans font-bold uppercase tracking-wider text-[#DCD09F]">Physical Keyboard Mappings (SDL3 Scancodes)</span>
+              <button id="btn-reset-keybinds" class="btn btn-ghost btn-xs text-xs font-mono text-base-content/60 hover:text-primary">Reset Defaults</button>
+            </div>
+
+            <div class="overflow-x-auto rounded-sm border border-base-300">
+              <table class="table table-xs bg-base-100 w-full text-xs">
+                <thead>
+                  <tr class="bg-base-200 text-[#DCD09F] font-sans border-b border-base-300">
+                    <th class="w-1/4">Action / Context</th>
+                    <th class="w-1/4">Switch Button</th>
+                    <th class="w-1/4">Primary Key / Mouse</th>
+                    <th class="w-1/4 text-right">Binding Code</th>
+                  </tr>
+                </thead>
+                <tbody id="keybinds-table-body">
+                  <!-- Dynamically rendered keyboard bindings -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2-Column Calibration Deck: Radar Scope & Rumble -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
           <!-- Left Stick Visualizer & Scope -->
@@ -226,12 +319,9 @@
               <div class="text-center space-y-2">
                 <span class="text-xs font-mono text-base-content/80 font-semibold">Left Stick (LS / Move)</span>
                 <div class="purah-scope-grid relative w-36 h-36 mx-auto bg-base-100 rounded-full border border-[#63A7BC]/40 shadow-inner flex items-center justify-center overflow-hidden">
-                  <!-- Visual Deadzone Circle -->
                   <div id="stick-l-deadzone-visual" class="absolute rounded-full border border-[#D08D1C]/60 bg-[#D08D1C]/15" style="width: 20%; height: 20%;"></div>
-                  <!-- Center crosshair lines -->
                   <div class="absolute w-full h-[1px] bg-[#63A7BC]/20"></div>
                   <div class="absolute h-full w-[1px] bg-[#63A7BC]/20"></div>
-                  <!-- Stick Position Dot -->
                   <div id="stick-l-dot" class="absolute w-3.5 h-3.5 rounded-full bg-[#63A7BC] shadow-[0_0_8px_#63A7BC] border border-white" style="transform: translate(0px, 0px);"></div>
                 </div>
                 <div id="stick-l-coords" class="font-mono text-[10px] text-[#63A7BC]">X: 0.00 | Y: 0.00</div>
@@ -241,12 +331,9 @@
               <div class="text-center space-y-2">
                 <span class="text-xs font-mono text-base-content/80 font-semibold">Right Stick (RS / Camera)</span>
                 <div class="purah-scope-grid relative w-36 h-36 mx-auto bg-base-100 rounded-full border border-[#63A7BC]/40 shadow-inner flex items-center justify-center overflow-hidden">
-                  <!-- Visual Deadzone Circle -->
                   <div id="stick-r-deadzone-visual" class="absolute rounded-full border border-[#D08D1C]/60 bg-[#D08D1C]/15" style="width: 20%; height: 20%;"></div>
-                  <!-- Center crosshair lines -->
                   <div class="absolute w-full h-[1px] bg-[#63A7BC]/20"></div>
                   <div class="absolute h-full w-[1px] bg-[#63A7BC]/20"></div>
-                  <!-- Stick Position Dot -->
                   <div id="stick-r-dot" class="absolute w-3.5 h-3.5 rounded-full bg-[#E8BF40] shadow-[0_0_8px_#E8BF40] border border-white" style="transform: translate(0px, 0px);"></div>
                 </div>
                 <div id="stick-r-coords" class="font-mono text-[10px] text-[#E8BF40]">X: 0.00 | Y: 0.00</div>
@@ -348,77 +435,142 @@
         </div>
       </section>
 
-      <!-- TAB 3: ROMFS & ASSET VAULT -->
+      <!-- TAB 3: ROMFS & SHADERS VAULT (PR #25) -->
       <section id="tab-assets" class="tab-content-panel space-y-6 hidden">
         <div class="card bg-base-200 border border-base-300 shadow-md p-6 space-y-6">
-          <div class="border-b border-base-300 pb-3">
-            <h3 class="font-sans font-bold text-lg text-[#DCD09F] uppercase tracking-wider">RomFS Asset Vault & Integrity</h3>
-            <p class="text-xs text-base-content/70">
-              Select your legally dumped Tears of the Kingdom 1.4.3 RomFS directory or pre-indexed <code class="text-xs bg-base-100 px-1 py-0.5 rounded font-mono text-[#E8BF40]">romfs.bin</code> file.
-            </p>
+          <div class="border-b border-base-300 pb-3 flex flex-col md:flex-row md:items-center justify-between gap-2">
+            <div>
+              <h3 class="font-sans font-bold text-lg text-[#DCD09F] uppercase tracking-wider">RomFS & Shaders Archive Vault (PR #25)</h3>
+              <p class="text-xs text-base-content/70">
+                Verify loose assets and manage linear binary packed archives (<code class="text-xs bg-base-100 px-1 py-0.5 rounded font-mono text-[#E8BF40]">romfs.bin</code> and <code class="text-xs bg-base-100 px-1 py-0.5 rounded font-mono text-[#63A7BC]">shaders.pack</code>) for zero descriptor exhaustion and instant launch.
+              </p>
+            </div>
+            <span class="badge badge-outline border-[#63A7BC]/50 text-[#63A7BC] font-mono text-xs">Pipeline Ready</span>
           </div>
 
           <!-- Path Input & Picker -->
           <div class="form-control space-y-2">
-            <label class="label py-0 text-xs font-sans font-bold uppercase tracking-wider text-[#DCD09F]">RomFS Location</label>
+            <label class="label py-0 text-xs font-sans font-bold uppercase tracking-wider text-[#DCD09F]">RomFS Base Directory Path</label>
             <div class="join w-full">
-              <input type="text" id="assets-romfs-input" placeholder="/path/to/extracted/romfs or /path/to/romfs.bin" class="input input-bordered join-item w-full font-mono text-xs bg-base-100 focus:border-[#D08D1C]" />
+              <input type="text" id="assets-romfs-input" placeholder="/path/to/extracted/romfs or /path/to/romfs.bin" class="input input-bordered join-item flex-1 font-mono text-xs bg-base-100 focus:border-[#D08D1C]" />
               <button id="btn-browse-romfs" class="btn btn-secondary join-item font-sans text-xs uppercase tracking-wider gap-2">
                 <svg class="w-4 h-4 fill-none stroke-current" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z"/></svg>
-                Browse Path
+                Select Directory
+              </button>
+              <button id="btn-verify-romfs" class="btn btn-outline border-base-300 join-item font-sans text-xs uppercase tracking-wider text-[#DCD09F] hover:bg-base-300">
+                Verify Path
               </button>
             </div>
           </div>
 
-          <!-- Integrity Checklist -->
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div id="check-version" class="alert bg-base-100 border border-base-300 text-xs flex items-center justify-between p-3 rounded-sm">
-              <div class="flex items-center gap-2">
-                <span class="indicator-icon">⚠️</span>
-                <span class="font-mono text-xs">System/Version/ett.byml</span>
-              </div>
-              <span class="badge badge-sm badge-ghost status-text font-mono">Missing</span>
-            </div>
+          <!-- Integrity Checklist Table -->
+          <div class="overflow-x-auto rounded-sm border border-base-300">
+            <table class="table table-sm bg-base-100 w-full text-xs">
+              <thead>
+                <tr class="bg-base-200 text-[#DCD09F] font-sans border-b border-base-300">
+                  <th class="w-12 text-center">Icon</th>
+                  <th>Target Subsystem / File</th>
+                  <th>Type & Pipeline</th>
+                  <th>Integrity & Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- Row 1: System/Version/ett.byml -->
+                <tr id="row-check-version" class="hover border-b border-base-300/60">
+                  <td class="text-center text-sm" id="icon-check-version">⚠️</td>
+                  <td>
+                    <div class="font-mono font-semibold text-[#EDE6D1]">System/Version/ett.byml</div>
+                    <div class="text-[10px] text-base-content/60">Loose RomFS 1.4.3 game version metadata</div>
+                  </td>
+                  <td class="text-xs text-base-content/75 font-mono">Loose BYML</td>
+                  <td><span id="badge-check-version" class="badge badge-sm badge-ghost font-mono text-[10px]">Checking...</span></td>
+                </tr>
 
-            <div id="check-pack" class="alert bg-base-100 border border-base-300 text-xs flex items-center justify-between p-3 rounded-sm">
-              <div class="flex items-center gap-2">
-                <span class="indicator-icon">⚠️</span>
-                <span class="font-mono text-xs">Pack/ (SZS Game Archives)</span>
-              </div>
-              <span class="badge badge-sm badge-ghost status-text font-mono">Missing</span>
-            </div>
+                <!-- Row 2: data/romfs/romfs.bin -->
+                <tr id="row-check-pack" class="hover border-b border-base-300/60">
+                  <td class="text-center text-sm" id="icon-check-pack">⚠️</td>
+                  <td>
+                    <div class="font-mono font-semibold text-[#EDE6D1]">data/romfs/romfs.bin</div>
+                    <div class="text-[10px] text-base-content/60">Single linear binary archive for instantaneous seek</div>
+                  </td>
+                  <td class="text-xs text-base-content/75 font-mono">Packed Bin</td>
+                  <td><span id="badge-check-pack" class="badge badge-sm badge-ghost font-mono text-[10px]">Checking...</span></td>
+                </tr>
 
-            <div id="check-shader" class="alert bg-base-100 border border-base-300 text-xs flex items-center justify-between p-3 rounded-sm">
-              <div class="flex items-center gap-2">
-                <span class="indicator-icon">⚠️</span>
-                <span class="font-mono text-xs">Shader/ (BNSH Archives)</span>
-              </div>
-              <span class="badge badge-sm badge-ghost status-text font-mono">Missing</span>
-            </div>
+                <!-- Row 3: Loose Shaders -->
+                <tr id="row-check-shader" class="hover border-b border-base-300/60">
+                  <td class="text-center text-sm" id="icon-check-shader">⚠️</td>
+                  <td>
+                    <div class="font-mono font-semibold text-[#EDE6D1]">data/shaders/ryujinx/ (*.spv)</div>
+                    <div class="text-[10px] text-base-content/60">Loose translated SPIR-V binaries and reflection JSONs</div>
+                  </td>
+                  <td class="text-xs text-base-content/75 font-mono">Loose SPIR-V</td>
+                  <td><span id="badge-check-shader" class="badge badge-sm badge-ghost font-mono text-[10px]">Checking...</span></td>
+                </tr>
+
+                <!-- Row 4: shaders.pack (PR #25) -->
+                <tr id="row-check-shader-pack" class="hover">
+                  <td class="text-center text-sm" id="icon-check-shader-pack">⚠️</td>
+                  <td>
+                    <div class="font-mono font-semibold text-[#63A7BC]">shaders.pack (PR #25 UTSHPK01)</div>
+                    <div class="text-[10px] text-base-content/60">Single-file pre-indexed binary shader package for 57k shaders</div>
+                  </td>
+                  <td class="text-xs text-base-content/75 font-mono">Single Archive</td>
+                  <td><span id="badge-check-shader-pack" class="badge badge-sm badge-ghost font-mono text-[10px]">Checking...</span></td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
-          <!-- Archive Packer Card -->
-          <div class="card bg-base-100 border border-base-300 p-5 space-y-4 rounded-sm">
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <!-- Dual Packing Actions Deck -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+            <!-- RomFS Packer -->
+            <div class="card bg-base-100 border border-base-300 p-5 space-y-4 rounded-sm">
               <div>
                 <h4 class="font-sans font-bold text-sm text-[#D08D1C] uppercase tracking-wider">Build Indexed romfs.bin</h4>
-                <p class="text-xs text-base-content/70">
-                  Compresses and indexes loose assets into a single linear binary for faster initial seek and zero runtime file descriptor exhaustion.
+                <p class="text-xs text-base-content/70 mt-1">
+                  Packs unpacked RomFS files into an indexed linear binary via <code class="font-mono text-[10px]">tools/setup.py --only romfs</code>.
                 </p>
               </div>
-              <button id="btn-pack-romfs" class="btn btn-primary btn-sm font-sans uppercase tracking-wider gap-2">
+
+              <button id="btn-pack-romfs" class="btn btn-primary btn-sm font-sans uppercase tracking-wider gap-2 w-full">
                 <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-                Pack romfs.bin Now
+                Build Indexed romfs.bin
               </button>
+
+              <div id="pack-progress-container" class="space-y-2 hidden pt-2">
+                <div class="flex justify-between text-xs font-mono">
+                  <span id="pack-progress-status" class="text-[#63A7BC]">Packing RomFS...</span>
+                  <span id="pack-progress-pct" class="text-[#E8BF40]">0%</span>
+                </div>
+                <progress id="pack-progress-bar" class="progress progress-primary w-full bg-base-200" value="0" max="100"></progress>
+              </div>
             </div>
 
-            <div id="pack-progress-container" class="space-y-2 hidden">
-              <div class="flex justify-between text-xs font-mono">
-                <span id="pack-progress-status" class="text-[#63A7BC]">Packing RomFS...</span>
-                <span id="pack-progress-pct" class="text-[#E8BF40]">0%</span>
+            <!-- PR #25 Shader Packer -->
+            <div class="card bg-base-100 border border-base-300 p-5 space-y-4 rounded-sm">
+              <div>
+                <h4 class="font-sans font-bold text-sm text-[#63A7BC] uppercase tracking-wider">Pack 57k Shaders -> shaders.pack</h4>
+                <p class="text-xs text-base-content/70 mt-1">
+                  Combines loose .spv and .res.json files into one UTSHPK01 binary archive via <code class="font-mono text-[10px]">tools/pack_shaders.py</code>.
+                </p>
               </div>
-              <progress id="pack-progress-bar" class="progress progress-primary w-full bg-base-200" value="0" max="100"></progress>
+
+              <button id="btn-pack-shaders" class="btn btn-secondary btn-sm font-sans uppercase tracking-wider gap-2 w-full text-[#DCD09F]">
+                <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                Pack 57k Shaders -> shaders.pack
+              </button>
+
+              <div id="shader-pack-progress-container" class="space-y-2 hidden pt-2">
+                <div class="flex justify-between text-xs font-mono">
+                  <span id="shader-pack-progress-status" class="text-[#63A7BC]">Packing Shaders...</span>
+                  <span id="shader-pack-progress-pct" class="text-[#E8BF40]">0%</span>
+                </div>
+                <progress id="shader-pack-progress-bar" class="progress progress-secondary w-full bg-base-200" value="0" max="100"></progress>
+              </div>
             </div>
+
           </div>
         </div>
       </section>
@@ -470,7 +622,7 @@
             <div class="flex items-center justify-between border-b border-base-300 pb-2">
               <div>
                 <h3 class="font-sans font-bold text-sm text-[#DCD09F] uppercase tracking-wider">Engine Shims & Runtime Patches</h3>
-                <p class="text-[11px] text-base-content/60">Toggle low-level allocator shims and performance hooks injected into guest routines</p>
+                <p class="text-[11px] text-base-content/60">Toggle low-level allocator shims, PR #24/#25 optimizations, and hooks applied at engine boot</p>
               </div>
               <button id="btn-save-patches" class="btn btn-xs btn-outline border-[#D08D1C] text-[#E8BF40] hover:bg-[#D08D1C] hover:text-[#111714] font-sans uppercase tracking-wider">Save Config</button>
             </div>
@@ -558,7 +710,7 @@
 
         <!-- Controller Indicator -->
         <div class="flex items-center gap-2">
-          <span class="text-base-content/60 uppercase tracking-wider text-[10px] font-semibold">Gamepad:</span>
+          <span class="text-base-content/60 uppercase tracking-wider text-[10px] font-semibold">Input:</span>
           <span id="stat-active-controller" class="badge badge-sm badge-secondary text-[11px] font-mono">None Detected</span>
           <span id="stat-controller-profile" class="text-[11px] text-base-content/60 font-mono hidden md:inline">Nintendo Layout</span>
         </div>

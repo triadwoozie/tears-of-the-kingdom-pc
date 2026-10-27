@@ -44,22 +44,30 @@ fn find_engine_binary(custom_path: &str) -> Result<PathBuf, String> {
 
     #[cfg(target_os = "windows")]
     let candidates = [
+        "refs/ultratears/ultratears.exe",
+        "./refs/ultratears/ultratears.exe",
+        "refs/ultratears/build/ultratears.exe",
+        "./refs/ultratears/build/ultratears.exe",
         "ultratears.exe",
         "./build/ultratears.exe",
-        "./refs/ultratears/build/ultratears.exe",
         "../build/ultratears.exe",
         "../../build/ultratears.exe",
     ];
 
     #[cfg(not(target_os = "windows"))]
     let candidates = [
-        "ultratears",
-        "./build/ultratears",
+        "refs/ultratears/ultratears",
+        "./refs/ultratears/ultratears",
+        "refs/ultratears/build/ultratears",
         "./refs/ultratears/build/ultratears",
-        "../build/ultratears",
-        "../../build/ultratears",
+        "build/ultratears",
+        "./build/ultratears",
+        "ultratears",
+        "/home/ryan/totk-desktop/refs/ultratears/ultratears",
         "/home/ryan/totk-desktop/refs/ultratears/build/ultratears",
         "/home/ryan/totk-desktop/build/ultratears",
+        "../refs/ultratears/ultratears",
+        "../../refs/ultratears/ultratears",
     ];
 
     for c in &candidates {
@@ -179,6 +187,7 @@ pub async fn launch_engine(
     };
     cmd.env("TOTK_RES_SCALE", res_scale);
 
+    // Gamepad settings
     if !config.controller.active_guid.is_empty() {
         cmd.env("TOTK_PAD_GUID", &config.controller.active_guid);
     }
@@ -192,11 +201,35 @@ pub async fn launch_engine(
     cmd.env("TOTK_PAD_RUMBLE_INTENSITY", config.controller.rumble_intensity.to_string());
     cmd.env("TOTK_PAD_HD_RUMBLE", if config.controller.hd_rumble_lra_sim { "1" } else { "0" });
 
+    // PR #20: Native Mouse Camera & Keyboard Input
+    if config.mouse.mouse_cam_enabled {
+        cmd.env("TOTK_CAMERA_MODE", "mouse");
+        cmd.env("TOTK_MOUSE_BACKEND", "native");
+        cmd.env("TOTK_MOUSE_SENSITIVITY", config.mouse.mouse_sens_x.to_string());
+        cmd.env("TOTK_MOUSE_INVERT_Y", if config.mouse.invert_y { "1" } else { "0" });
+        cmd.env("TOTK_MOUSE_LOOK_DEG_PER_COUNT", (0.04 * (config.mouse.mouse_sens_x / 1.0)).to_string());
+    } else {
+        cmd.env("TOTK_CAMERA_MODE", "keyboard");
+    }
+
+    for (k, v) in &config.mouse.keybinds {
+        cmd.env(format!("TOTK_KEY_{}", k), v);
+    }
+
+    // PR #25: Shaders Pack archive lookup
+    if config.shader_pack.use_shaders_pack && !config.shader_pack.shaders_pack_path.is_empty() {
+        cmd.env("TOTK_SHADERS_PACK", &config.shader_pack.shaders_pack_path);
+        cmd.env("TOTK_SHADER_PACK", &config.shader_pack.shaders_pack_path);
+    }
+
     // Patches
     for patch in &config.patches {
         if patch.enabled {
             match patch.id.as_str() {
                 "patch_zero_heap" => { cmd.env("TOTK_PATCH_ZERO_HEAP_FALLBACK", "1"); },
+                "patch_jump_table_fallback" => { cmd.env("TOTK_PATCH_JUMP_TABLE_FALLBACK", "1"); },
+                "patch_shaders_pack" => { cmd.env("TOTK_PATCH_SHADERS_PACK", "1"); },
+                "patch_mouse_camera" => { cmd.env("TOTK_PATCH_MOUSE_CAMERA", "1"); },
                 "patch_loose_romfs" => { cmd.env("TOTK_PATCH_LOOSE_ROMFS", "1"); },
                 "patch_60fps_lock" => { cmd.env("TOTK_PATCH_60FPS", "1"); },
                 "patch_disable_drs" => { cmd.env("TOTK_PATCH_DISABLE_DRS", "1"); },
@@ -249,12 +282,14 @@ pub async fn launch_engine(
             let mut reader = BufReader::new(err).lines();
             while let Ok(Some(line)) = reader.next_line().await {
                 let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-                let channel = if line.contains("[totk-gfx]") {
+                let channel = if line.contains("[totk-gfx]") || line.contains("NVN") {
                     "gfx"
-                } else if line.contains("SIGSEGV") || line.contains("fault") || line.contains("error") || line.contains("fatal") || line.contains("***") {
+                } else if line.contains("[totk-thread]") {
+                    "thread"
+                } else if line.contains("SIGSEGV") || line.contains("error") || line.contains("fault") || line.contains("***") {
                     "error"
                 } else {
-                    "error"
+                    "info"
                 };
                 let _ = app_clone2.emit("engine-log", EngineLogEntry {
                     channel: channel.to_string(),
@@ -265,11 +300,12 @@ pub async fn launch_engine(
         });
     }
 
+    *guard = Some(child);
+
     let _ = app.emit("engine-status", EngineState {
         is_running: true,
         pid: Some(pid),
     });
 
-    *guard = Some(child);
     Ok(pid)
 }
