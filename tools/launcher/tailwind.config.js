@@ -1,0 +1,81 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        totk: {
+          amber: "#D08D1C",
+          azure: "#63A7BC",
+          green: "#12582C",
+          topaz: "#E8BF40",
+          parchment: "#DCD09F",
+          slate: "#111714",
+          stone: "#17201C",
+          trim: "#222F29",
+        },
+      },
+      fontFamily: {
+        sans: ["Plus Jakarta Sans", "Inter", "system-ui", "sans-serif"],
+        mono: ["'JetBrains Mono'", "Fira Code", "monospace"],
+      },
+    },
+  },
+  plugins: [
+    require("daisyui"),
+  ],
+  daisyui: {
+    themes: [
+      {
+        "sky-island-dark": {
+          "primary": "#D08D1C",
+          "primary-content": "#111614",
+          "secondary": "#12582C",
+          "secondary-content": "#DCD09F",
+          "accent": "#63A7BC",
+          "accent-content": "#0E171A",
+          "neutral": "#1A231E",
+          "neutral-content": "#DCD09F",
+          "base-100": "#111714",
+          "base-200": "#17201C",
+          "base-300": "#222F29",
+          "base-content": "#EDE6D1",
+          "info": "#63A7BC",
+          "success": "#2E8B57",
+          "warning": "#E8BF40",
+          "error": "#C93B3B",
+          "--rounded-box": "0.25rem",
+          "--rounded-btn": "0.125rem",
+          "--rounded-badge": "0.125rem",
+          "--tab-radius": "0rem",
+        },
+        "sky-island-light": {
+          "primary": "#12582C",
+          "primary-content": "#F7F4E9",
+          "secondary": "#D08D1C",
+          "secondary-content": "#111714",
+          "accent": "#63A7BC",
+          "accent-content": "#FFFFFF",
+          "neutral": "#C8BC8E",
+          "neutral-content": "#1C241E",
+          "base-100": "#EAE2C6",
+          "base-200": "#DCD09F",
+          "base-300": "#C7B985",
+          "base-content": "#1A241E",
+          "info": "#63A7BC",
+          "success": "#2E8B57",
+          "warning": "#E8BF40",
+          "error": "#C93B3B",
+          "--rounded-box": "0.25rem",
+          "--rounded-btn": "0.125rem",
+          "--rounded-badge": "0.125rem",
+          "--tab-radius": "0rem",
+        },
+      },
+    ],
+    darkTheme: "sky-island-dark",
+  },
+}
